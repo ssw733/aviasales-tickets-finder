@@ -84,6 +84,7 @@ func errorHandler(err error) {
 }
 
 func getTickets(params Params) []Flight {
+	fmt.Println(params)
 	config.LoadConfig()
 	db, err := sql.Open("mysql", config.Conf.Mysql.User+":"+config.Conf.Mysql.Password+"@/"+config.Conf.Mysql.DBName)
 	errorHandler(err)
@@ -93,7 +94,7 @@ func getTickets(params Params) []Flight {
 	var q []any
 	queryString := "SELECT * FROM tickets WHERE 1 "
 
-	params.Transfer = 10
+	params.Transfer = 12
 	if len(params.Origin) > 0 {
 		condition += " AND origin = ? "
 		q = append(q, params.Origin)
@@ -120,7 +121,7 @@ func getTickets(params Params) []Flight {
 	} else {
 		tableName := "temp_tickets" + strconv.FormatInt(time.Now().Unix(), 10)
 		createTable, err := db.Query("CREATE TABLE IF NOT EXISTS " + tableName + " (id_path VARCHAR(255) PRIMARY KEY, way_path VARCHAR(255), origin VARCHAR(3), destination VARCHAR(3) NOT NULL, timestamp INT NOT NULL, iteration INT NOT NULL, total_price INT NOT NULL, " +
-			"INDEX(origin)" + //Для поика и селекта минимальной цены
+			"INDEX(origin)" +
 			") ENGINE=MEMORY")
 		errorHandler(err)
 		createTable.Close()
@@ -150,7 +151,7 @@ func getTickets(params Params) []Flight {
 				"WHERE tt.iteration = ? AND t.price + tt.total_price < ? AND t.timestamp < tt.timestamp "+
 				"GROUP BY t.origin, t.destination", t, minPrice, t-1, minPrice)*/
 				rows, err := db.Query("INSERT INTO "+tableName+" (id_path, way_path, origin, destination, timestamp, iteration, total_price) "+
-					"SELECT CONCAT(t.id, '/', tt.id_path), CONCAT(t.destination, '/', tt.way_path), t.origin, tt.origin, t.timestamp, ?, tt.total_price+t.price FROM temp_tickets as tt  "+
+					"SELECT CONCAT(t.id, '/', tt.id_path), CONCAT(t.destination, '/', tt.way_path), t.origin, tt.origin, t.timestamp, ?, tt.total_price+t.price FROM "+tableName+" as tt  "+
 					//"INNER JOIN tickets as t USE INDEX (podtD) ON (tt.origin = t.destination AND tt.iteration = ? AND t.timestamp < tt.timestamp AND tt.total_price+t.price <= ?) "+
 					"INNER JOIN tickets as t ON (tt.origin = t.destination AND tt.iteration = ? AND t.timestamp < tt.timestamp AND tt.total_price+t.price <= ?) "+
 					"INNER JOIN tickets as t2 USE INDEX (podtD) ON (t.origin = t2.origin AND t.destination = t2.destination AND t.price = t2.price AND t.timestamp = t2.timestamp) "+
@@ -164,7 +165,7 @@ func getTickets(params Params) []Flight {
 				}
 				rows.Close()
 			}
-			fmt.Println("Transfer ", t, "price: ", minPrice, "Р")
+			//fmt.Println("Transfer ", t, "price: ", minPrice, "Р")
 		}
 
 		rows, err := db.Query("SELECT id_path, way_path, iteration, total_price FROM "+tableName+" WHERE origin IN (?) ORDER BY total_price", params.Origin)
@@ -172,27 +173,26 @@ func getTickets(params Params) []Flight {
 		for rows.Next() {
 			var flight Flight
 			rows.Scan(&flight.IdPath, &flight.WayPath, &flight.Transfers, &flight.TotalPrice)
-			fmt.Println(flight)
 			tickets := strings.Split(flight.IdPath, "/")
 			var ticks []Ticket
 			for _, ticket_id := range tickets {
-				rows, err := db.Query("SELECT id, origin, destination, timestamp, price, link FROM tickets WHERE id = ?", ticket_id)
+				rows2, err := db.Query("SELECT id, origin, destination, timestamp, price, link FROM tickets WHERE id = ? LIMIT 1", ticket_id)
 				errorHandler(err)
-				var tick Ticket
-				for rows.Next() {
-					rows.Scan(&tick.Id, &tick.Origin, &tick.Destination, &tick.Timestamp, &tick.Price, &tick.Link)
+				for rows2.Next() {
+					var tick Ticket
+					rows2.Scan(&tick.Id, &tick.Origin, &tick.Destination, &tick.Timestamp, &tick.Price, &tick.Link)
 					tick.Link = "https://www.aviasales.ru" + tick.Link
-					//fmt.Println(tick.Link)
 					ticks = append(ticks, tick)
 				}
+				rows2.Close()
 			}
 			flight.Ticket = ticks
 			flights = append(flights, flight)
 		}
 		rows.Close()
-		rows2, err := db.Query("DROP TABLE " + tableName)
+		rows3, err := db.Query("DROP TABLE " + tableName)
 		errorHandler(err)
-		rows2.Close()
+		rows3.Close()
 	}
 	return flights
 }
