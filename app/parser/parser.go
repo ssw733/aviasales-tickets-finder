@@ -60,15 +60,9 @@ func ParseMeta() {
 	checkWays()
 }
 
-func ParsePrices() {
-	for {
-		parcePrices()
-	}
-}
-
 func errorHandler(err error) {
 	if err != nil {
-		panic(err)
+		//panic(err)
 	}
 }
 
@@ -143,7 +137,7 @@ func checkWay(way string) {
 	}
 }
 
-func parcePrices() {
+func ParsePrices() {
 	rows, err := Db.Query("SELECT origin, destination FROM ways WHERE updated = 0")
 	errorHandler(err)
 	for rows.Next() {

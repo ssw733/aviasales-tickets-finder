@@ -32,14 +32,14 @@ type Flight struct {
 }
 
 type Params struct {
-	Origin      string `schema:"orig"`
-	Destination string `schema:"dest"`
-	Price       int    `schema:"price"`
-	Transfer    int    `schema:"transfer"`
-	TimeDepMin  int    `schema:"timestamp_dep_min"`
-	TimeDepMax  int    `schema:"timestamp_dep_max"`
-	TimeArrMin  int    `schema:"timestamp_arr_min"`
-	TimeArrMax  int    `schema:"timestamp_arr_max"`
+	Origin         string `schema:"orig"`
+	Destination    string `schema:"dest"`
+	Transfer       int    `schema:"transfer"`
+	TransferPeriod int    `schema:"transfer_period"`
+	TimeDepMin     int    `schema:"timestamp_dep_min"`
+	TimeDepMax     int    `schema:"timestamp_dep_max"`
+	TimeArrMin     int    `schema:"timestamp_arr_min"`
+	TimeArrMax     int    `schema:"timestamp_arr_max"`
 }
 
 type Response struct {
@@ -60,13 +60,38 @@ func getTicketsHandler(w http.ResponseWriter, r *http.Request) {
 	var response Response
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	params := r.URL.Query()
-	if len(params["origin"]) > 0 && len(params["destination"]) > 0 {
-		response.Response = getTickets(Params{
-			Origin:      params["origin"][0],
-			Destination: params["destination"][0],
-			//Transfer:    strconv.Atoi(params["transfers"][0]),
-		})
+	query := r.URL.Query()
+	fmt.Println(r.RemoteAddr)
+	var isValidQuery bool
+	var params Params
+	if len(query["origin"]) > 0 {
+		params.Origin = query["origin"][0]
+		isValidQuery = true
+	}
+	if len(query["destination"]) > 0 {
+		params.Destination = query["destination"][0]
+		isValidQuery = true
+	}
+	if len(query["transfer"]) > 0 {
+		params.Transfer, _ = strconv.Atoi(query["transfer"][0])
+	}
+	if len(query["transferPeriod"]) > 0 {
+		params.TransferPeriod, _ = strconv.Atoi(query["transferPeriod"][0])
+	}
+	if len(query["timeDepMin"]) > 0 {
+		params.TimeDepMin, _ = strconv.Atoi(query["timeDepMin"][0])
+	}
+	if len(query["timeDepMax"]) > 0 {
+		params.TimeDepMax, _ = strconv.Atoi(query["timeDepMax"][0])
+	}
+	if len(query["timeArrMin"]) > 0 {
+		params.TimeArrMin, _ = strconv.Atoi(query["timeArrMin"][0])
+	}
+	if len(query["timeArrMax"]) > 0 {
+		params.TimeArrMax, _ = strconv.Atoi(query["timeArrMax"][0])
+	}
+	if isValidQuery {
+		response.Response = getTickets(params)
 		response.Msg = append(response.Msg, "ok")
 		responseJson, _ := json.Marshal(response)
 		fmt.Fprint(w, string(responseJson))
@@ -90,11 +115,10 @@ func getTickets(params Params) []Flight {
 	errorHandler(err)
 	defer db.Close()
 
-	var condition string
-	var q []any
+	var condition, condition2 string
+	var q, q2 []any
 	queryString := "SELECT * FROM tickets WHERE 1 "
 
-	params.Transfer = 12
 	if len(params.Origin) > 0 {
 		condition += " AND origin = ? "
 		q = append(q, params.Origin)
@@ -102,21 +126,37 @@ func getTickets(params Params) []Flight {
 	if len(params.Destination) > 0 {
 		condition += " AND destination = ? "
 		q = append(q, params.Destination)
+		condition2 += " AND destination IN (?) "
+		q2 = append(q2, params.Destination)
 	}
-	if params.Price > 0 {
-		condition += " AND price < ?"
-		q = append(q, params.Price)
+	if params.TimeArrMin > 0 {
+		condition += " AND timestamp > ? "
+		q = append(q, params.TimeArrMin)
+		condition2 += " AND timestamp > ? "
+		q2 = append(q2, params.TimeArrMin)
+	}
+	if params.TimeArrMax > 0 {
+		condition += " AND timestamp < ? "
+		q = append(q, params.TimeArrMax)
+		condition2 += " AND timestamp < ? "
+		q2 = append(q2, params.TimeArrMax)
 	}
 
 	var flights []Flight
 
 	if params.Transfer == 0 {
 		queryString += condition
-		rows, err := db.Query(queryString, q...)
+		rows, err := db.Query(queryString+" ORDER BY price LIMIT 1", q...)
 		errorHandler(err)
 		for rows.Next() {
 			var ticket Ticket
 			rows.Scan(&ticket.Id, &ticket.Origin, &ticket.Destination, &ticket.Price, &ticket.Timestamp, &ticket.Link)
+			var flight Flight
+			flight.Ticket = append(flight.Ticket, ticket)
+			flight.TotalPrice = ticket.Price
+			flight.WayPath = ticket.Destination
+			flight.Transfers = 0
+			flights = append(flights, flight)
 		}
 	} else {
 		tableName := "temp_tickets" + strconv.FormatInt(time.Now().Unix(), 10)
@@ -137,10 +177,11 @@ func getTickets(params Params) []Flight {
 					rows.Scan(&minPrice)
 				}
 				rows.Close()
-				rows, err = db.Query("INSERT INTO "+tableName+" (id_path, way_path, origin, destination, timestamp, iteration, total_price) "+
-					"(SELECT id, destination, origin, destination, timestamp, ?, min(price) FROM tickets WHERE price <= ? AND destination IN (?) GROUP BY origin, destination)", t, minPrice, params.Destination)
+				q2 = append([]any{t, minPrice}, q2...)
+				rows2, err := db.Query("INSERT INTO "+tableName+" (id_path, way_path, origin, destination, timestamp, iteration, total_price) "+
+					"(SELECT id, destination, origin, destination, timestamp, ?, min(price) FROM tickets WHERE price <= ? "+condition2+" GROUP BY origin, destination)", q2...)
 				errorHandler(err)
-				rows.Close()
+				rows2.Close()
 			} else {
 				/*rows, err := db.Query("INSERT INTO temp_tickets (id_path, way_path, origin, destination, timestamp, iteration, total_price) "+
 				"SELECT CONCAT(t.id, '/', tt.id_path), CONCAT(t.destination, '/', tt.way_path), t.origin, tt.origin, t.timestamp, ?, tt.total_price+t.price FROM temp_tickets as tt  "+
@@ -152,10 +193,9 @@ func getTickets(params Params) []Flight {
 				"GROUP BY t.origin, t.destination", t, minPrice, t-1, minPrice)*/
 				rows, err := db.Query("INSERT INTO "+tableName+" (id_path, way_path, origin, destination, timestamp, iteration, total_price) "+
 					"SELECT CONCAT(t.id, '/', tt.id_path), CONCAT(t.destination, '/', tt.way_path), t.origin, tt.origin, t.timestamp, ?, tt.total_price+t.price FROM "+tableName+" as tt  "+
-					//"INNER JOIN tickets as t USE INDEX (podtD) ON (tt.origin = t.destination AND tt.iteration = ? AND t.timestamp < tt.timestamp AND tt.total_price+t.price <= ?) "+
-					"INNER JOIN tickets as t ON (tt.origin = t.destination AND tt.iteration = ? AND t.timestamp < tt.timestamp AND tt.total_price+t.price <= ?) "+
+					"INNER JOIN tickets as t ON (tt.origin = t.destination AND tt.iteration = ? AND t.timestamp < tt.timestamp AND (t.timestamp + ?) > tt.timestamp AND tt.total_price+t.price <= ?) "+
 					"INNER JOIN tickets as t2 USE INDEX (podtD) ON (t.origin = t2.origin AND t.destination = t2.destination AND t.price = t2.price AND t.timestamp = t2.timestamp) "+
-					"GROUP BY t2.origin, t2.destination", t, t-1, minPrice)
+					"GROUP BY t2.origin, t2.destination", t, t-1, params.TransferPeriod*24*60*60, minPrice)
 				errorHandler(err)
 				rows.Close()
 				rows, err = db.Query("SELECT min(total_price) FROM "+tableName+" WHERE origin IN (?)", params.Origin)
@@ -165,7 +205,7 @@ func getTickets(params Params) []Flight {
 				}
 				rows.Close()
 			}
-			//fmt.Println("Transfer ", t, "price: ", minPrice, "Р")
+			fmt.Println("Transfer ", t, "price: ", minPrice, "Р")
 		}
 
 		rows, err := db.Query("SELECT id_path, way_path, iteration, total_price FROM "+tableName+" WHERE origin IN (?) ORDER BY total_price", params.Origin)
