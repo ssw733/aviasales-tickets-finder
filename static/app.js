@@ -534,24 +534,6 @@ function buildPayload() {
   return payload;
 }
 
-function updateCacheInfo(cache) {
-  if (!cache) {
-    $("cache-info").textContent = "Кэш: —";
-    return;
-  }
-  $("cache-info").textContent = `Кэш: ${cache.routes} маршрутов · ${cache.offers} предложений`;
-}
-
-async function refreshCacheInfo() {
-  try {
-    const response = await fetch("/api/cache");
-    if (!response.ok) return;
-    updateCacheInfo(await response.json());
-  } catch (error) {
-    return;
-  }
-}
-
 function numberHuman(value) {
   return new Intl.NumberFormat("ru-RU").format(Number(value) || 0);
 }
@@ -563,13 +545,11 @@ function formatTimestamp(value) {
 
 function updateDbInfo(db) {
   if (!db) {
-    $("db-info").textContent = "БД/RAM: —";
+    $("db-info").textContent = "БД: —";
     return;
   }
   const updated = formatTimestamp(db.last_bulk_finished || db.last_bulk_started);
-  $("db-info").textContent = `БД: ${numberHuman(db.offers)} билетов · ${numberHuman(
-    db.routes
-  )} маршрутов · RAM: ${numberHuman(db.ram_offers)} билетов · обновлено ${updated}`;
+  $("db-info").textContent = `БД: ${numberHuman(db.offers)} билетов · обновлено ${updated}`;
 }
 
 async function refreshDbInfo() {
@@ -580,17 +560,6 @@ async function refreshDbInfo() {
   } catch (error) {
     return;
   }
-}
-
-function renderWarnings(warnings) {
-  const target = $("warnings");
-  if (!Array.isArray(warnings) || warnings.length === 0) {
-    target.innerHTML = "";
-    return;
-  }
-  target.innerHTML = warnings
-    .map((warning) => `<div class="warning-line">${esc(warning)}</div>`)
-    .join("");
 }
 
 function drawSearchCities(data) {
@@ -906,25 +875,13 @@ function renderResults(data) {
   state.activeIndex = -1;
   const count = state.itineraries.length;
   $("results-count").textContent = count ? `Найдено: ${count}` : "Ничего не найдено";
-  const source = data.source === "ram" ? "RAM" : "БД/API";
-  const failed = data.routes_failed ? ` · ошибок ${data.routes_failed}` : "";
-  $("search-info").textContent = `Источник: ${source} · маршрутов ${numberHuman(
-    data.routes_requested
-  )} · предложений ${numberHuman(data.offers_considered)}${failed} · время ${(
-    data.elapsed_ms / 1000
-  ).toFixed(1)} с`;
-  updateCacheInfo(data.cache);
-  renderWarnings(data.warnings);
   drawSearchCities(data);
   refreshDbInfo();
 
   const list = $("results-list");
   $("results-tabs").classList.toggle("hidden", count === 0);
   if (count === 0) {
-    const warnings = Array.isArray(data.warnings) ? data.warnings.slice(0, 3).join(" ") : "";
-    list.innerHTML = `<div class="empty-state">${esc(
-      warnings || "Маршруты не найдены. Попробуйте изменить даты или ограничения."
-    )}</div>`;
+    list.innerHTML = `<div class="empty-state">Маршруты не найдены. Попробуйте изменить даты или ограничения.</div>`;
     clearLayer(state.routeLayer);
     return;
   }
@@ -956,7 +913,7 @@ async function runSearch() {
       throw new Error((data && data.error) || `Ошибка HTTP ${response.status}`);
     }
     renderResults(data);
-    setStatus(`Готово за ${(data.elapsed_ms / 1000).toFixed(1)} с`, "ok");
+    setStatus("Готово", "ok");
   } catch (error) {
     setStatus(error.message || String(error), "error");
   } finally {
@@ -1047,7 +1004,6 @@ function init() {
     if (!tab) return;
     renderGroup(tab.dataset.group);
   });
-  refreshCacheInfo();
   refreshDbInfo();
 }
 
