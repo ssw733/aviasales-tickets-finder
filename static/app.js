@@ -717,11 +717,10 @@ function itineraryHtml(itinerary, index) {
           className: "pill kind-single",
         };
   const firstLink = safeUrl(legs[0]?.link);
-  const ticketLink = firstLink
-    ? `<a class="buy-link primary-ticket-link" href="${esc(firstLink)}" target="_blank" rel="noopener noreferrer">${
-        legs.length === 1 ? "Открыть билет на Aviasales" : "Открыть первый билет"
-      }</a>`
-    : "";
+  const ticketLink =
+    legs.length === 1 && firstLink
+      ? `<a class="buy-link primary-ticket-link" href="${esc(firstLink)}" target="_blank" rel="noopener noreferrer">Открыть билет на Aviasales</a>`
+      : "";
   const ticketNote =
     legs.length > 1
       ? `<div class="ticket-note">Составной маршрут: каждый сегмент — отдельный билет.</div>`
