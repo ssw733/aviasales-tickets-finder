@@ -595,17 +595,22 @@ impl StaticData {
     pub fn resolve_airport_codes(&self, input: &str) -> Option<Vec<String>> {
         let code = input.trim().to_uppercase();
         if let Some(airport) = self.airport_by_code.get(&code) {
+            if airport.iata_type == "airport" && airport.flightable && is_iata_code(&code) {
+                return Some(vec![code]);
+            }
+        }
+        if let Some(city_code) = self.resolve_city_code(input) {
+            let airports = self.airports_for_city(&city_code);
+            if !airports.is_empty() {
+                return Some(airports);
+            }
+        }
+        if let Some(airport) = self.airport_by_code.get(&code) {
             if airport.iata_type == "airport" && is_iata_code(&code) {
                 return Some(vec![code]);
             }
         }
-        let city_code = self.resolve_city_code(input)?;
-        let airports = self.airports_for_city(&city_code);
-        if airports.is_empty() {
-            None
-        } else {
-            Some(airports)
-        }
+        None
     }
 
     pub fn airport_point(&self, airport_code: &str) -> Option<CityPoint> {
