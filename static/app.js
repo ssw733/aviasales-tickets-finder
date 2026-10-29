@@ -1,6 +1,6 @@
 const state = {
-  origin: { mode: "city", point: null, radius: 150, countries: [] },
-  destination: { mode: "city", point: null, radius: 150, countries: [] },
+  origin: { mode: "place", point: null, radius: 150, places: [] },
+  destination: { mode: "place", point: null, radius: 150, places: [] },
   pickMode: null,
   itineraries: [],
   groups: { price: [], transfers: [], dates: [], duration: [] },
@@ -168,11 +168,11 @@ function updateModeUI(which) {
   const mode = $(`${which}-mode`).value;
   state[which].mode = mode;
   const cityWrap = $(`${which}-city-wrap`);
-  const countryWrap = $(`${which}-country-wrap`);
+  const placeWrap = $(`${which}-country-wrap`);
   const regionWrap = $(`${which}-region-wrap`);
   const anyNote = $(`${which}-any-note`);
-  cityWrap.classList.toggle("hidden", mode !== "city");
-  countryWrap.classList.toggle("hidden", mode !== "country");
+  cityWrap.classList.add("hidden");
+  placeWrap.classList.toggle("hidden", mode !== "place");
   regionWrap.classList.toggle("hidden", mode !== "region");
   anyNote.classList.toggle("hidden", mode !== "any");
   if (mode !== "region") {
@@ -258,7 +258,7 @@ function bindCityAutocomplete(inputId) {
   });
 }
 
-function bindCountryAutocomplete(inputId) {
+function bindPlaceAutocomplete(inputId) {
   const input = $(inputId);
   let timer = null;
   input.addEventListener("input", () => {
@@ -267,15 +267,15 @@ function bindCountryAutocomplete(inputId) {
     if (query.length < 2) return;
     timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/countries?q=${encodeURIComponent(query)}&limit=15`);
+        const response = await fetch(`/api/places?q=${encodeURIComponent(query)}&limit=20`);
         if (!response.ok) return;
-        const countries = await response.json();
-        $("country-list").innerHTML = countries
+        const places = await response.json();
+        $("country-list").innerHTML = places
           .map(
-            (country) =>
-              `<option value="${esc(country.code)}">${esc(country.code)} — ${esc(
-                country.name
-              )}</option>`
+            (place) =>
+              `<option value="${esc(place.code)}">${esc(place.code)} — ${esc(place.name)}${
+                place.kind === "country" ? " (страна)" : ""
+              }</option>`
           )
           .join("");
       } catch (error) {
@@ -285,31 +285,31 @@ function bindCountryAutocomplete(inputId) {
   });
 }
 
-function renderCountryChips(side) {
+function renderPlaceChips(side) {
   const target = $(`${side}-country-chips`);
-  const countries = state[side].countries;
-  target.innerHTML = countries
+  const places = state[side].places;
+  target.innerHTML = places
     .map(
-      (country) =>
+      (place) =>
         `<button type="button" class="chip country-chip" data-side="${side}" data-code="${esc(
-          country.code
-        )}" title="Удалить">${esc(country.code)} · ${esc(country.name)} ×</button>`
+          place.code
+        )}" title="Удалить">${esc(place.code)} · ${esc(place.name)} ×</button>`
     )
     .join("");
   target.querySelectorAll(".country-chip").forEach((button) => {
     button.addEventListener("click", () => {
-      state[side].countries = state[side].countries.filter(
-        (country) => country.code !== button.dataset.code
+      state[side].places = state[side].places.filter(
+        (place) => place.code !== button.dataset.code
       );
-      renderCountryChips(side);
+      renderPlaceChips(side);
     });
   });
 }
 
-async function addCountriesFromInput(side) {
+async function addPlacesFromInput(side) {
   const input = $(`${side}-country`);
   const parts = input.value
-    .split(",")
+    .split(/[,\n]+/)
     .map((value) => value.trim())
     .filter(Boolean);
   if (parts.length === 0) return;
@@ -317,29 +317,45 @@ async function addCountriesFromInput(side) {
   for (const part of parts) {
     try {
       const response = await fetch(
-        `/api/countries?q=${encodeURIComponent(part)}&limit=1`
+        `/api/places?q=${encodeURIComponent(part)}&limit=20`
       );
       if (!response.ok) {
         errors.push(part);
         continue;
       }
       const items = await response.json();
-      const country = items[0];
-      if (!country) {
+      let place = items.find(
+        (item) => item.code.toUpperCase() === part.toUpperCase()
+      );
+      if (!place) {
+        place = items.find(
+          (item) => item.name.toLowerCase() === part.toLowerCase()
+        );
+      }
+      if (!place) place = items[0];
+      if (!place) {
         errors.push(part);
         continue;
       }
-      if (!state[side].countries.some((item) => item.code === country.code)) {
-        state[side].countries.push({ code: country.code, name: country.name });
+      if (
+        !state[side].places.some(
+          (item) => item.code === place.code && item.kind === place.kind
+        )
+      ) {
+        state[side].places.push({
+          kind: place.kind,
+          code: place.code,
+          name: place.name,
+        });
       }
     } catch (error) {
       errors.push(part);
     }
   }
   input.value = "";
-  renderCountryChips(side);
+  renderPlaceChips(side);
   if (errors.length > 0) {
-    setStatus(`Не найдено стран: ${errors.join(", ")}`, "error");
+    setStatus(`Не найдено: ${errors.join(", ")}`, "error");
   }
 }
 
@@ -348,21 +364,23 @@ function endpointPayload(which) {
   if (item.mode === "any") {
     return { mode: "any" };
   }
-  if (item.mode === "country") {
+  if (item.mode === "place") {
     const raw = $(`${which}-country`).value.trim();
     const values = [
-      ...item.countries.map((country) => country.code),
+      ...item.places.map((place) => place.code),
       ...raw
-        .split(",")
+        .split(/[,\n]+/)
         .map((value) => value.trim())
         .filter(Boolean),
     ];
     if (values.length === 0) {
       throw new Error(
-        which === "origin" ? "Укажите страну отправления." : "Укажите страну назначения."
+        which === "origin"
+          ? "Укажите город или страну отправления."
+          : "Укажите город или страну назначения."
       );
     }
-    return { mode: "country", codes: values };
+    return { mode: "auto", codes: values };
   }
   if (item.mode === "region") {
     if (!item.point) {
@@ -400,8 +418,8 @@ function buildPayload() {
     destination: endpointPayload("destination"),
     max_transfers: numberValue("max-transfers"),
     max_connection_days: numberValue("max-connection-days"),
-    exclude_origin_countries: splitList($("origin-exclude").value),
-    exclude_destination_countries: splitList($("destination-exclude").value),
+    exclude_origin_places: splitList($("origin-exclude").value),
+    exclude_destination_places: splitList($("destination-exclude").value),
   };
   const dates = {
     depart_from: $("depart-from").value,
@@ -898,18 +916,16 @@ function init() {
     });
   });
 
-  bindCityAutocomplete("origin-city");
-  bindCityAutocomplete("destination-city");
-  bindCountryAutocomplete("origin-country");
-  bindCountryAutocomplete("destination-country");
+  bindPlaceAutocomplete("origin-country");
+  bindPlaceAutocomplete("destination-country");
   document.querySelectorAll(".add-country").forEach((button) => {
-    button.addEventListener("click", () => addCountriesFromInput(button.dataset.side));
+    button.addEventListener("click", () => addPlacesFromInput(button.dataset.side));
   });
   ["origin", "destination"].forEach((side) => {
     $(`${side}-country`).addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        addCountriesFromInput(side);
+        addPlacesFromInput(side);
       }
     });
   });

@@ -380,27 +380,71 @@ fn resolve_excluded_countries(
     Ok(countries)
 }
 
+#[derive(Default)]
+struct ExcludedPlaces {
+    countries: HashSet<String>,
+    airports: HashSet<String>,
+}
+
+impl ExcludedPlaces {
+    fn is_empty(&self) -> bool {
+        self.countries.is_empty() && self.airports.is_empty()
+    }
+}
+
+fn resolve_excluded_places(
+    data: &StaticData,
+    places: &[String],
+    countries: &[String],
+) -> Result<ExcludedPlaces, String> {
+    let mut excluded = ExcludedPlaces {
+        countries: resolve_excluded_countries(data, countries)?,
+        airports: HashSet::new(),
+    };
+    for value in places {
+        for part in value.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some(airports) = data.resolve_airport_codes(part) {
+                for airport in airports {
+                    excluded.airports.insert(airport);
+                }
+            } else if let Some(country) = data.resolve_country_code(part) {
+                excluded.countries.insert(country);
+            } else {
+                return Err(format!("Город или страна не найдены: {part}"));
+            }
+        }
+    }
+    Ok(excluded)
+}
+
 fn country_of_airport(data: &StaticData, airport: &str) -> Option<String> {
     data.airport_by_code
         .get(airport)
         .map(|value| value.country_code.clone())
 }
 
+fn airport_is_excluded(data: &StaticData, airport: &str, excluded: &ExcludedPlaces) -> bool {
+    excluded.airports.contains(airport)
+        || country_of_airport(data, airport)
+            .map(|country| excluded.countries.contains(&country))
+            .unwrap_or(false)
+}
+
 fn filter_airport_codes(
     data: &StaticData,
     codes: Vec<String>,
-    excluded: &HashSet<String>,
+    excluded: &ExcludedPlaces,
 ) -> Vec<String> {
-    if excluded.is_empty() {
+    if excluded.countries.is_empty() && excluded.airports.is_empty() {
         return codes;
     }
     codes
         .into_iter()
-        .filter(|code| {
-            country_of_airport(data, code)
-                .map(|country| !excluded.contains(&country))
-                .unwrap_or(false)
-        })
+        .filter(|code| !airport_is_excluded(data, code, excluded))
         .collect()
 }
 
@@ -408,7 +452,7 @@ fn filter_endpoint(
     data: &StaticData,
     codes: Vec<String>,
     points: Vec<CityPoint>,
-    excluded: &HashSet<String>,
+    excluded: &ExcludedPlaces,
 ) -> (Vec<String>, Vec<CityPoint>) {
     let codes = filter_airport_codes(data, codes, excluded);
     let allowed: HashSet<&str> = codes.iter().map(String::as_str).collect();
@@ -503,6 +547,58 @@ async fn resolve_fixed(
             let codes = points.iter().map(|point| point.code.clone()).collect();
             Ok((codes, points))
         }
+        Endpoint::Auto { code, codes, limit } => {
+            let mut inputs: Vec<String> = codes.clone();
+            if let Some(code) = code {
+                inputs.push(code.clone());
+            }
+            let mut points: Vec<CityPoint> = Vec::new();
+            let mut seen: HashSet<String> = HashSet::new();
+            for input in inputs {
+                for part in input.split(',') {
+                    let part = part.trim();
+                    if part.is_empty() {
+                        continue;
+                    }
+                    if let Some(airports) = data.resolve_airport_codes(part) {
+                        for airport in airports {
+                            if seen.insert(airport.clone()) {
+                                if let Some(point) = data.airport_point(&airport) {
+                                    points.push(point);
+                                }
+                            }
+                        }
+                    } else if let Some(country) = data.resolve_country_code(part) {
+                        for point in data.airports_in_country(&country, 400) {
+                            if seen.insert(point.code.clone()) {
+                                points.push(point);
+                            }
+                        }
+                    } else {
+                        return Err(format!("Город или страна не найдены: {part}"));
+                    }
+                }
+            }
+            points.sort_by(|a, b| {
+                let da = data
+                    .airport_by_code
+                    .get(&a.code)
+                    .map(|airport| data.degree(&airport.city_code))
+                    .unwrap_or(0);
+                let db = data
+                    .airport_by_code
+                    .get(&b.code)
+                    .map(|airport| data.degree(&airport.city_code))
+                    .unwrap_or(0);
+                db.cmp(&da).then_with(|| a.code.cmp(&b.code))
+            });
+            points.truncate(limit.unwrap_or(300).clamp(1, 400));
+            if points.is_empty() {
+                return Err("Не найдено аэропортов для выбранных городов/стран.".to_string());
+            }
+            let codes = points.iter().map(|point| point.code.clone()).collect();
+            Ok((codes, points))
+        }
         Endpoint::Any => Err("Внутренняя ошибка: Any передан в resolve_fixed".to_string()),
     }
 }
@@ -514,8 +610,8 @@ async fn resolve_endpoints(
     graph: Option<&Graph>,
     request: &SearchRequest,
     currency: &str,
-    exclude_origins: &HashSet<String>,
-    exclude_dests: &HashSet<String>,
+    exclude_origins: &ExcludedPlaces,
+    exclude_dests: &ExcludedPlaces,
     warnings: &mut Vec<String>,
 ) -> Result<(Vec<String>, Vec<CityPoint>, Vec<String>, Vec<CityPoint>), String> {
     let origin_any = matches!(request.origin, Endpoint::Any);
@@ -1488,9 +1584,16 @@ pub async fn run_search(
         max_legs,
     };
 
-    let exclude_origins = resolve_excluded_countries(&data, &request.exclude_origin_countries)?;
-    let exclude_dests =
-        resolve_excluded_countries(&data, &request.exclude_destination_countries)?;
+    let exclude_origins = resolve_excluded_places(
+        &data,
+        &request.exclude_origin_places,
+        &request.exclude_origin_countries,
+    )?;
+    let exclude_dests = resolve_excluded_places(
+        &data,
+        &request.exclude_destination_places,
+        &request.exclude_destination_countries,
+    )?;
 
     let graph = graph_cache.snapshot().await;
     let graph_usable = graph.currency == currency && !graph.offers.is_empty();
@@ -1514,12 +1617,8 @@ pub async fn run_search(
             if offer.transfers > constraints.max_transfers {
                 continue;
             }
-            if country_of_airport(&data, &offer.origin_airport)
-                .map(|country| exclude_origins.contains(&country))
-                .unwrap_or(false)
-                || country_of_airport(&data, &offer.destination_airport)
-                    .map(|country| exclude_dests.contains(&country))
-                    .unwrap_or(false)
+            if airport_is_excluded(&data, &offer.origin_airport, &exclude_origins)
+                || airport_is_excluded(&data, &offer.destination_airport, &exclude_dests)
             {
                 continue;
             }
@@ -1614,16 +1713,8 @@ pub async fn run_search(
             }
         }
     }
-    origins.retain(|code| {
-        country_of_airport(&data, code)
-            .map(|country| !exclude_origins.contains(&country))
-            .unwrap_or(false)
-    });
-    dests.retain(|code| {
-        country_of_airport(&data, code)
-            .map(|country| !exclude_dests.contains(&country))
-            .unwrap_or(false)
-    });
+    origins.retain(|code| !airport_is_excluded(&data, code, &exclude_origins));
+    dests.retain(|code| !airport_is_excluded(&data, code, &exclude_dests));
     if origins.is_empty() || (!dest_any && dests.is_empty()) {
         return Err("Все аэропорты отправления или назначения исключены.".to_string());
     }

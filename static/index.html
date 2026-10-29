@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-3">
+  <link rel="stylesheet" href="/style.css?v=20261029-4">
 </head>
 <body>
   <div id="app">
@@ -22,8 +22,7 @@
         <div class="panel-head">
           <h2>Откуда</h2>
           <select id="origin-mode" class="mode-select">
-            <option value="city">Город</option>
-            <option value="country">Страна</option>
+            <option value="place">Город или страна</option>
             <option value="region">Регион</option>
             <option value="any">Откуда угодно</option>
           </select>
@@ -33,11 +32,11 @@
         </div>
         <div id="origin-country-wrap" class="hidden">
           <div class="country-picker">
-            <input id="origin-country" class="city-input" list="country-list" placeholder="RU, TR, Россия" autocomplete="off">
+            <input id="origin-country" class="city-input" list="country-list" placeholder="Ульяновск, Санкт-Петербург, RU, Россия" autocomplete="off">
             <button type="button" class="add-country" data-side="origin">+</button>
           </div>
           <div id="origin-country-chips" class="chips"></div>
-          <div class="hint">Можно перечислить несколько стран через запятую. До 200 аэропортов суммарно.</div>
+          <div class="hint">Можно добавить несколько городов и стран: ввод, Enter или «+». До 300 аэропортов суммарно.</div>
         </div>
         <div id="origin-region-wrap" class="region-wrap hidden">
           <div class="coords-row">
@@ -54,15 +53,14 @@
           <div id="origin-region-cities" class="chips"></div>
         </div>
         <div id="origin-any-note" class="note hidden">Проверяются все аэропорты из БД и RAM-графа, откуда есть рейсы в точку назначения.</div>
-        <label class="exclude-label">Исключить страны<textarea id="origin-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
+        <label class="exclude-label">Исключить города/страны<textarea id="origin-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
       </section>
 
       <section class="panel">
         <div class="panel-head">
           <h2>Куда</h2>
           <select id="destination-mode" class="mode-select">
-            <option value="city">Город</option>
-            <option value="country">Страна</option>
+            <option value="place">Город или страна</option>
             <option value="region">Регион</option>
             <option value="any">Куда угодно</option>
           </select>
@@ -72,11 +70,11 @@
         </div>
         <div id="destination-country-wrap" class="hidden">
           <div class="country-picker">
-            <input id="destination-country" class="city-input" list="country-list" placeholder="RU, TR, Россия" autocomplete="off">
+            <input id="destination-country" class="city-input" list="country-list" placeholder="Санкт-Петербург, Хургада, TR, Египет" autocomplete="off">
             <button type="button" class="add-country" data-side="destination">+</button>
           </div>
           <div id="destination-country-chips" class="chips"></div>
-          <div class="hint">Можно перечислить несколько стран через запятую. До 200 аэропортов суммарно.</div>
+          <div class="hint">Можно добавить несколько городов и стран: ввод, Enter или «+». До 300 аэропортов суммарно.</div>
         </div>
         <div id="destination-region-wrap" class="region-wrap hidden">
           <div class="coords-row">
@@ -93,7 +91,7 @@
           <div id="destination-region-cities" class="chips"></div>
         </div>
         <div id="destination-any-note" class="note hidden">Проверяются все направления/аэропорты из БД и RAM-графа, а не только крупные хабы.</div>
-        <label class="exclude-label">Исключить страны<textarea id="destination-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
+        <label class="exclude-label">Исключить города/страны<textarea id="destination-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
       </section>
 
       <section class="panel">
@@ -149,6 +147,6 @@
   <datalist id="city-list"></datalist>
   <datalist id="country-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-3"></script>
+  <script src="/app.js?v=20261029-4"></script>
 </body>
 </html>

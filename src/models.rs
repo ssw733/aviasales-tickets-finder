@@ -72,6 +72,13 @@ pub struct CountryPoint {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PlacePoint {
+    pub kind: String,
+    pub code: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Airport {
     pub code: String,
@@ -198,6 +205,14 @@ pub enum Endpoint {
         #[serde(default)]
         limit: Option<usize>,
     },
+    Auto {
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        codes: Vec<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     Any,
 }
 
@@ -231,6 +246,10 @@ pub struct SearchRequest {
     pub exclude_origin_countries: Vec<String>,
     #[serde(default)]
     pub exclude_destination_countries: Vec<String>,
+    #[serde(default)]
+    pub exclude_origin_places: Vec<String>,
+    #[serde(default)]
+    pub exclude_destination_places: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

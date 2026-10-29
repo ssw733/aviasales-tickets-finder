@@ -11,7 +11,8 @@ use crate::bulk::{BulkConfig, DiscoveryConfig};
 use crate::data::StaticData;
 use crate::graph::GraphCache;
 use crate::models::{
-    CacheStats, CityPoint, CountryPoint, DbStats, ErrorResponse, SearchRequest, SearchResponse,
+    CacheStats, CityPoint, CountryPoint, DbStats, ErrorResponse, PlacePoint, SearchRequest,
+    SearchResponse,
 };
 use crate::store::Store;
 use anyhow::{Context, Result};
@@ -95,6 +96,13 @@ struct CountriesParams {
 }
 
 #[derive(Deserialize)]
+struct PlacesParams {
+    q: String,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
 struct RegionParams {
     lat: f64,
     lon: f64,
@@ -127,6 +135,30 @@ async fn countries(
             .data
             .search_countries(&params.q, params.limit.unwrap_or(20)),
     )
+}
+
+async fn places(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<PlacesParams>,
+) -> Json<Vec<PlacePoint>> {
+    let limit = params.limit.unwrap_or(20).clamp(1, 50);
+    let mut places = Vec::new();
+    for city in state.data.search_cities(&params.q, limit) {
+        places.push(PlacePoint {
+            kind: "city".to_string(),
+            code: city.code,
+            name: city.name,
+        });
+    }
+    for country in state.data.search_countries(&params.q, limit) {
+        places.push(PlacePoint {
+            kind: "country".to_string(),
+            code: country.code,
+            name: country.name,
+        });
+    }
+    places.truncate(limit * 2);
+    Json(places)
 }
 
 async fn region(
@@ -202,6 +234,7 @@ fn app(state: Arc<AppState>) -> Router {
         .route("/api/health", get(health))
         .route("/api/cities", get(cities))
         .route("/api/countries", get(countries))
+        .route("/api/places", get(places))
         .route("/api/region", get(region))
         .route("/api/cache", get(cache_stats))
         .route("/api/db", get(db_stats))
