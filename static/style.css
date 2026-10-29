@@ -881,3 +881,37 @@ input[type="range"]:focus {
 body.modal-open {
   overflow: hidden;
 }
+
+.filter-check {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-check input {
+  width: 15px;
+  height: 15px;
+}
+
+.kind-single {
+  background: #ecfdf3;
+  border-color: #abefc6;
+  color: #067647;
+}
+
+.kind-self {
+  background: #fffaeb;
+  border-color: #fedf89;
+  color: #b54708;
+}

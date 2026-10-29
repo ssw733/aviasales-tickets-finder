@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-13">
+  <link rel="stylesheet" href="/style.css?v=20261029-14">
 </head>
 <body>
   <div id="app">
@@ -130,6 +130,7 @@
               <button type="button" class="tab" data-group="transfers">Пересадки</button>
               <button type="button" class="tab" data-group="dates">Даты</button>
               <button type="button" class="tab" data-group="duration">Время</button>
+              <label class="filter-check"><input id="composite-only" type="checkbox"> Только составные</label>
             </div>
           </div>
           <span id="results-count"></span>
@@ -158,6 +159,6 @@
   <datalist id="country-list"></datalist>
   <datalist id="exclude-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-13"></script>
+  <script src="/app.js?v=20261029-14"></script>
 </body>
 </html>

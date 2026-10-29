@@ -5,6 +5,7 @@ const state = {
   itineraries: [],
   directions: [],
   activeDirectionKey: null,
+  compositeOnly: false,
   groups: { price: [], transfers: [], dates: [], duration: [] },
   activeGroup: "price",
   activeIndex: -1,
@@ -694,6 +695,20 @@ function itineraryHtml(itinerary, index) {
     parts.push(result.leg);
     if (result.transfer) parts.push(result.transfer);
   });
+  const ticketKind =
+    legs.length > 1
+      ? {
+          text: `Составной · ${legs.length} ${plural(legs.length, [
+            "билет",
+            "билета",
+            "билетов",
+          ])}`,
+          className: "pill kind-self",
+        }
+      : {
+          text: "Единый билет",
+          className: "pill kind-single",
+        };
   const firstLink = safeUrl(legs[0]?.link);
   const ticketLink = firstLink
     ? `<a class="buy-link primary-ticket-link" href="${esc(firstLink)}" target="_blank" rel="noopener noreferrer">${
@@ -715,6 +730,7 @@ function itineraryHtml(itinerary, index) {
           ${ticketNote}
         </div>
         <div class="summary">
+          <span class="${ticketKind.className}">${esc(ticketKind.text)}</span>
           <span class="pill blue">${esc(transfersText(itinerary.total_transfers))}</span>
           <span class="pill">в пути ${minutesHuman(itinerary.travel_minutes)}</span>
           <span class="pill">вылет ${esc(depart.date)}, ${esc(depart.time)}</span>
@@ -876,6 +892,7 @@ function renderGroup(group) {
   const rank = new Map(order.map((index, position) => [index, position]));
   const byDirection = new Map();
   state.itineraries.forEach((itinerary, index) => {
+    if (state.compositeOnly && itinerary.legs.length <= 1) return;
     const direction = itineraryDirection(itinerary);
     if (!byDirection.has(direction.key)) {
       byDirection.set(direction.key, { ...direction, variants: [] });
@@ -897,6 +914,13 @@ function renderGroup(group) {
 
   state.directions = directions;
   const list = $("results-list");
+  if (directions.length === 0) {
+    list.innerHTML =
+      '<div class="empty-state">Нет маршрутов с выбранным фильтром.</div>';
+    $("results-count").textContent = "Направлений: 0";
+    clearLayer(state.routeLayer);
+    return;
+  }
   list.innerHTML = directions
     .map((direction) => {
       const best = state.itineraries[direction.best];
@@ -1096,6 +1120,10 @@ function init() {
     });
   });
   $("search-button").addEventListener("click", runSearch);
+  $("composite-only").addEventListener("change", (event) => {
+    state.compositeOnly = event.target.checked;
+    renderGroup(state.activeGroup || "price");
+  });
   $("results-tabs").addEventListener("click", (event) => {
     const tab = event.target.closest(".tab");
     if (!tab) return;
