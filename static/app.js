@@ -389,7 +389,7 @@ function endpointPayload(which) {
 
 function splitList(value) {
   return value
-    .split(",")
+    .split(/[,\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

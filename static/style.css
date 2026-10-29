@@ -761,6 +761,21 @@ input[type="range"]:focus {
   margin-top: 10px;
 }
 
-.exclude-label input {
-  border-style: dashed;
+.exclude-input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 11px;
+  outline: none;
+  resize: vertical;
+  font: inherit;
+}
+
+.exclude-input:focus {
+  border-color: #84adff;
+  border-style: solid;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-2">
+  <link rel="stylesheet" href="/style.css?v=20261029-3">
 </head>
 <body>
   <div id="app">
@@ -54,7 +54,7 @@
           <div id="origin-region-cities" class="chips"></div>
         </div>
         <div id="origin-any-note" class="note hidden">Проверяются все аэропорты из БД и RAM-графа, откуда есть рейсы в точку назначения.</div>
-        <label class="exclude-label">Исключить страны<input id="origin-exclude" autocomplete="new-password" autocorrect="off" autocapitalize="characters" spellcheck="false"></label>
+        <label class="exclude-label">Исключить страны<textarea id="origin-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
       </section>
 
       <section class="panel">
@@ -93,7 +93,7 @@
           <div id="destination-region-cities" class="chips"></div>
         </div>
         <div id="destination-any-note" class="note hidden">Проверяются все направления/аэропорты из БД и RAM-графа, а не только крупные хабы.</div>
-        <label class="exclude-label">Исключить страны<input id="destination-exclude" autocomplete="new-password" autocorrect="off" autocapitalize="characters" spellcheck="false"></label>
+        <label class="exclude-label">Исключить страны<textarea id="destination-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
       </section>
 
       <section class="panel">
@@ -109,7 +109,7 @@
           <label>Макс. пересадок<input id="max-transfers" type="number" min="0" max="5" value="2"></label>
           <label>Макс. дней на пересадку<input id="max-connection-days" type="number" min="0" max="30" value="2"></label>
         </div>
-        <div class="hint">Сначала проверяются прямые билеты. Если прямой дорогой, ищутся только варианты с пересадками, которые дешевле него. Макс. дней на пересадку относится к стыковкам между отдельными билетами. «Исключить страны» действует только на начальный/конечный аэропорт; пересадки в исключённой стране разрешены.</div>
+        <div class="hint">Сначала проверяются прямые билеты. Если прямой дорогой, ищутся только варианты с пересадками, которые дешевле него. Макс. дней на пересадку относится к стыковкам между отдельными билетами.</div>
         <button id="search-button" class="primary">Искать маршрут</button>
         <div id="status" class="status"></div>
       </section>
@@ -149,6 +149,6 @@
   <datalist id="city-list"></datalist>
   <datalist id="country-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-2"></script>
+  <script src="/app.js?v=20261029-3"></script>
 </body>
 </html>
