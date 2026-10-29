@@ -55,6 +55,16 @@ fn parse_tz(value: &str) -> Option<Tz> {
     value.trim().parse::<Tz>().ok()
 }
 
+fn normalize_name(value: &str) -> String {
+    value
+        .to_lowercase()
+        .replace('ё', "е")
+        .replace('-', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn is_iata_code(code: &str) -> bool {
     let bytes = code.as_bytes();
     bytes.len() == 3 && bytes.iter().all(|value| value.is_ascii_uppercase())
@@ -382,12 +392,12 @@ impl StaticData {
         if let Some(city_code) = self.airport_to_city.get(&code) {
             return Some(city_code.clone());
         }
-        let lower = input.trim().to_lowercase();
+        let lower = normalize_name(input);
         if lower.is_empty() {
             return None;
         }
         let mut matches = self.cities.values().filter(|city| {
-            city.name.to_lowercase() == lower || city.name_en.to_lowercase() == lower
+            normalize_name(&city.name) == lower || normalize_name(&city.name_en) == lower
         });
         let first = matches.next()?;
         if matches.next().is_some() {
@@ -435,6 +445,7 @@ impl StaticData {
         if query.is_empty() {
             return Vec::new();
         }
+        let query_norm = normalize_name(&query);
         let query_upper = query.to_uppercase();
         let mut scored: Vec<(u8, CityPoint)> = Vec::new();
         let mut seen = HashSet::new();
@@ -459,15 +470,15 @@ impl StaticData {
 
         for city in self.cities.values() {
             let code = city.code.to_lowercase();
-            let name = city.name.to_lowercase();
-            let name_en = city.name_en.to_lowercase();
+            let name = normalize_name(&city.name);
+            let name_en = normalize_name(&city.name_en);
             let score = if code == query {
                 0
             } else if code.starts_with(&query) {
                 2
-            } else if name.starts_with(&query) || name_en.starts_with(&query) {
+            } else if name.starts_with(&query_norm) || name_en.starts_with(&query_norm) {
                 3
-            } else if name.contains(&query) || name_en.contains(&query) {
+            } else if name.contains(&query_norm) || name_en.contains(&query_norm) {
                 4
             } else {
                 continue;
@@ -499,13 +510,10 @@ impl StaticData {
         if self.countries.contains_key(&code) {
             return Some(code);
         }
-        let lower = input.trim().to_lowercase();
-        let mut matches = self
-            .countries
-            .values()
-            .filter(|country| {
-                country.name.to_lowercase() == lower || country.name_en.to_lowercase() == lower
-            });
+        let lower = normalize_name(input);
+        let mut matches = self.countries.values().filter(|country| {
+            normalize_name(&country.name) == lower || normalize_name(&country.name_en) == lower
+        });
         let first = matches.next()?;
         if matches.next().is_some() {
             return None;
@@ -518,6 +526,7 @@ impl StaticData {
         if query.is_empty() {
             return Vec::new();
         }
+        let query_norm = normalize_name(&query);
         let query_upper = query.to_uppercase();
         let mut scored: Vec<(u8, CountryPoint)> = Vec::new();
         if let Some(country) = self.countries.get(&query_upper) {
@@ -531,15 +540,15 @@ impl StaticData {
         }
         for country in self.countries.values() {
             let code = country.code.to_lowercase();
-            let name = country.name.to_lowercase();
-            let name_en = country.name_en.to_lowercase();
+            let name = normalize_name(&country.name);
+            let name_en = normalize_name(&country.name_en);
             let score = if code == query {
                 0
             } else if code.starts_with(&query) {
                 1
-            } else if name.starts_with(&query) || name_en.starts_with(&query) {
+            } else if name.starts_with(&query_norm) || name_en.starts_with(&query_norm) {
                 2
-            } else if name.contains(&query) || name_en.contains(&query) {
+            } else if name.contains(&query_norm) || name_en.contains(&query_norm) {
                 3
             } else {
                 continue;
