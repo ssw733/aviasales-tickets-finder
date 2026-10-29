@@ -5,6 +5,7 @@ const state = {
   itineraries: [],
   directions: [],
   activeDirectionKey: null,
+  variantsSort: "price",
   compositeOnly: false,
   groups: { price: [], transfers: [], dates: [], duration: [] },
   activeGroup: "price",
@@ -695,8 +696,14 @@ function itineraryHtml(itinerary, index) {
     parts.push(result.leg);
     if (result.transfer) parts.push(result.transfer);
   });
-  const ticketKind =
-    legs.length > 1
+  const throughTicket =
+    legs.length === 1 && Number(legs[0]?.transfers || 0) > 0;
+  const ticketKind = throughTicket
+    ? {
+        text: "Aviasales · готовый билет",
+        className: "pill kind-aviasales",
+      }
+    : legs.length > 1
       ? {
           text: `Составной · ${legs.length} ${plural(legs.length, [
             "билет",
@@ -834,47 +841,91 @@ function openVariants(key) {
   const direction = state.directions.find((item) => item.key === key);
   if (!direction) return;
   state.activeDirectionKey = key;
-  const dates = new Map();
-  direction.variants.forEach((index) => {
-    const itinerary = state.itineraries[index];
-    const dateKey = (itinerary.depart_at || "").slice(0, 10);
-    if (!dates.has(dateKey)) dates.set(dateKey, []);
-    dates.get(dateKey).push(index);
-  });
-  const sections = [...dates.entries()]
-    .map(([dateKey, indexes]) => {
-      const sample = state.itineraries[indexes[0]];
-      return `
-        <section class="variant-date-section">
-          <div class="variant-date-title">${esc(dateParts(sample.depart_at).date)} · ${
-            indexes.length
-          } ${plural(indexes.length, ["вариант", "варианта", "вариантов"])}</div>
-          <div class="variant-date-list">
-            ${indexes
-              .map(
-                (index) =>
-                  `<div class="variant-wrap">${itineraryHtml(
-                    state.itineraries[index],
-                    index
-                  )}</div>`
-              )
-              .join("")}
-          </div>
-        </section>
-      `;
-    })
-    .join("");
   $("variants-title").textContent = `${direction.originCode} → ${direction.destCode} · ${direction.originName} → ${direction.destName}`;
-  $("variants-content").innerHTML = sections;
   $("variants-modal").classList.remove("hidden");
   document.body.classList.add("modal-open");
-  document.querySelectorAll("#variants-content .itinerary").forEach((card) => {
+  renderVariants(true);
+}
+
+function renderVariants(drawFirst) {
+  const direction = state.directions.find(
+    (item) => item.key === state.activeDirectionKey
+  );
+  if (!direction) return;
+  const container = $("variants-content");
+  const priceSorted = [...direction.variants].sort((a, b) => {
+    const ia = state.itineraries[a];
+    const ib = state.itineraries[b];
+    return (
+      ia.total_price - ib.total_price ||
+      Date.parse(ia.depart_at) - Date.parse(ib.depart_at)
+    );
+  });
+  if (state.variantsSort === "price") {
+    container.innerHTML = priceSorted
+      .map(
+        (index) =>
+          `<div class="variant-wrap">${itineraryHtml(
+            state.itineraries[index],
+            index
+          )}</div>`
+      )
+      .join("");
+  } else {
+    const dates = new Map();
+    direction.variants.forEach((index) => {
+      const itinerary = state.itineraries[index];
+      const dateKey = (itinerary.depart_at || "").slice(0, 10);
+      if (!dates.has(dateKey)) dates.set(dateKey, []);
+      dates.get(dateKey).push(index);
+    });
+    const sections = [...dates.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([dateKey, indexes]) => {
+        indexes.sort((a, b) => {
+          const ia = state.itineraries[a];
+          const ib = state.itineraries[b];
+          return (
+            ia.total_price - ib.total_price ||
+            Date.parse(ia.depart_at) - Date.parse(ib.depart_at)
+          );
+        });
+        const sample = state.itineraries[indexes[0]];
+        return `
+          <section class="variant-date-section">
+            <div class="variant-date-title">${esc(dateParts(sample.depart_at).date)} · ${
+              indexes.length
+            } ${plural(indexes.length, ["вариант", "варианта", "вариантов"])}</div>
+            <div class="variant-date-list">
+              ${indexes
+                .map(
+                  (index) =>
+                    `<div class="variant-wrap">${itineraryHtml(
+                      state.itineraries[index],
+                      index
+                    )}</div>`
+                )
+                .join("")}
+            </div>
+          </section>
+        `;
+      })
+      .join("");
+    container.innerHTML = sections;
+  }
+  document.querySelectorAll(".sort-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.sort === state.variantsSort);
+  });
+  container.querySelectorAll(".itinerary").forEach((card) => {
     card.addEventListener("click", (event) => {
       if (event.target.closest("a")) return;
       drawItinerary(Number(card.dataset.index));
     });
   });
-  drawItinerary(direction.best);
+  container.scrollTop = 0;
+  if (drawFirst && priceSorted.length > 0) {
+    drawItinerary(priceSorted[0]);
+  }
 }
 
 function closeVariants() {
@@ -1133,6 +1184,12 @@ function init() {
   window.addEventListener("scroll", scheduleDirectionSpy, { passive: true });
   $("variants-content").addEventListener("scroll", scheduleVariantsSpy, {
     passive: true,
+  });
+  document.querySelectorAll(".sort-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.variantsSort = button.dataset.sort;
+      renderVariants(true);
+    });
   });
   $("variants-back").addEventListener("click", closeVariants);
   $("variants-close").addEventListener("click", closeVariants);

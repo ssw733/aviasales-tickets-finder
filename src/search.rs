@@ -1690,6 +1690,55 @@ pub async fn run_search(
         return Err("Не удалось определить точки отправления или назначения.".to_string());
     }
 
+    let mut aviasales_offers: Vec<Offer> = Vec::new();
+    if !origin_any && !dest_any && origins.len() * dests.len() <= 32 {
+        let pairs: Vec<(String, String)> = origins
+            .iter()
+            .flat_map(|origin| {
+                dests
+                    .iter()
+                    .map(move |destination| (origin.clone(), destination.clone()))
+            })
+            .collect();
+        let fetched = futures::stream::iter(pairs.into_iter().map(|(origin, destination)| {
+            let api = api.clone();
+            let currency = currency.clone();
+            async move {
+                api.fetch_through_offers(&origin, &destination, &currency)
+                    .await
+            }
+        }))
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await;
+        for result in fetched {
+            if let Ok(offers) = result {
+                for offer in offers.iter() {
+                    if offer.transfers == 0 || offer.transfers > constraints.max_transfers {
+                        continue;
+                    }
+                    if offer.depart_local_date < constraints.depart_from
+                        || offer.depart_local_date > constraints.depart_to
+                        || offer.arrive_local_date < constraints.arrive_from
+                        || offer.arrive_local_date > constraints.arrive_to
+                    {
+                        continue;
+                    }
+                    aviasales_offers.push(offer.clone());
+                }
+            }
+        }
+        aviasales_offers.sort_by(|a, b| {
+            a.price
+                .partial_cmp(&b.price)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.depart_at.cmp(&b.depart_at))
+        });
+        aviasales_offers.dedup_by(|a, b| {
+            a.link == b.link && a.depart_at == b.depart_at && (a.price - b.price).abs() < 0.01
+        });
+    }
+
     if graph_usable {
         if dest_any {
             let mut seen: HashSet<String> = dests.iter().cloned().collect();
@@ -1878,7 +1927,7 @@ pub async fn run_search(
             )
         };
 
-    let (itineraries, groups) = build_response(
+    let (mut itineraries, mut groups) = build_response(
         &data,
         source.offers(),
         results,
@@ -1886,6 +1935,120 @@ pub async fn run_search(
         &optimize,
         max_results,
     );
+    if !aviasales_offers.is_empty() {
+        let mut base_min: HashMap<String, f64> = HashMap::new();
+        for itinerary in &itineraries {
+            if let (Some(first), Some(last)) = (itinerary.legs.first(), itinerary.legs.last()) {
+                let key = format!("{}|{}", first.origin, last.destination);
+                base_min
+                    .entry(key)
+                    .and_modify(|price| {
+                        if itinerary.total_price < *price {
+                            *price = itinerary.total_price;
+                        }
+                    })
+                    .or_insert(itinerary.total_price);
+            }
+        }
+        aviasales_offers.retain(|offer| {
+            let key = format!("{}|{}", offer.origin, offer.destination);
+            base_min
+                .get(&key)
+                .map(|price| offer.price < *price)
+                .unwrap_or(true)
+        });
+        let base_links: HashSet<String> = itineraries
+            .iter()
+            .flat_map(|itinerary| itinerary.legs.iter().map(|leg| leg.link.clone()))
+            .collect();
+        aviasales_offers.retain(|offer| !base_links.contains(&offer.link));
+    }
+    if !aviasales_offers.is_empty() {
+        let aviasales_results: Vec<PathResult> = aviasales_offers
+            .iter()
+            .enumerate()
+            .map(|(index, offer)| PathResult {
+                offer_ids: vec![index],
+                price: offer.price,
+                travel_min: offer.duration_min,
+                transfers: offer.transfers,
+                depart_at: offer.depart_at,
+                arrive_at: offer.arrive_at,
+            })
+            .collect();
+        let (aviasales_itineraries, aviasales_groups) = build_response(
+            &data,
+            &aviasales_offers,
+            aviasales_results,
+            &currency,
+            &optimize,
+            max_results,
+        );
+        if !aviasales_itineraries.is_empty() {
+            let base_len = itineraries.len();
+            itineraries.extend(aviasales_itineraries);
+            let shifted = |values: &[usize]| -> Vec<usize> {
+                values.iter().map(|value| value + base_len).collect()
+            };
+            let timestamp = |value: &str| -> i64 {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .map(|date| date.timestamp())
+                    .unwrap_or(0)
+            };
+            groups.price.extend(shifted(&aviasales_groups.price));
+            groups.transfers.extend(shifted(&aviasales_groups.transfers));
+            groups.dates.extend(shifted(&aviasales_groups.dates));
+            groups.duration.extend(shifted(&aviasales_groups.duration));
+            groups.price.sort_by(|a, b| {
+                let ia = &itineraries[*a];
+                let ib = &itineraries[*b];
+                ia.total_price
+                    .partial_cmp(&ib.total_price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
+                    .then_with(|| ia.travel_minutes.cmp(&ib.travel_minutes))
+                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
+            });
+            groups.transfers.sort_by(|a, b| {
+                let ia = &itineraries[*a];
+                let ib = &itineraries[*b];
+                ia.total_transfers
+                    .cmp(&ib.total_transfers)
+                    .then_with(|| {
+                        ia.total_price
+                            .partial_cmp(&ib.total_price)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| ia.travel_minutes.cmp(&ib.travel_minutes))
+                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
+            });
+            groups.dates.sort_by(|a, b| {
+                let ia = &itineraries[*a];
+                let ib = &itineraries[*b];
+                timestamp(&ia.depart_at)
+                    .cmp(&timestamp(&ib.depart_at))
+                    .then_with(|| {
+                        ia.total_price
+                            .partial_cmp(&ib.total_price)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
+            });
+            groups.duration.sort_by(|a, b| {
+                let ia = &itineraries[*a];
+                let ib = &itineraries[*b];
+                ia.travel_minutes
+                    .cmp(&ib.travel_minutes)
+                    .then_with(|| {
+                        ia.total_price
+                            .partial_cmp(&ib.total_price)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
+                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
+            });
+        }
+    }
     if itineraries.is_empty() {
         warnings.push(
             "Маршруты не найдены. Попробуйте расширить окна дат, увеличить радиус/лимит городов, число пересадок или лимит маршрутов."

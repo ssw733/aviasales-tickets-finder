@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-15">
+  <link rel="stylesheet" href="/style.css?v=20261029-17">
 </head>
 <body>
   <div id="app">
@@ -151,6 +151,11 @@
         <div id="variants-title" class="modal-title"></div>
         <button id="variants-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
       </div>
+      <div class="variants-toolbar">
+        <span>Сортировка:</span>
+        <button type="button" class="sort-btn active" data-sort="price">По цене</button>
+        <button type="button" class="sort-btn" data-sort="date">По дате</button>
+      </div>
       <div id="variants-content" class="variants-content"></div>
     </div>
   </div>
@@ -159,6 +164,6 @@
   <datalist id="country-list"></datalist>
   <datalist id="exclude-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-15"></script>
+  <script src="/app.js?v=20261029-17"></script>
 </body>
 </html>

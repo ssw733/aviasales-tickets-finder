@@ -136,6 +136,28 @@ impl Travelpayouts {
         currency: &str,
         store_it: bool,
     ) -> Result<Arc<Vec<Offer>>, String> {
+        self.fetch_offers(origin, destination, currency, true, store_it)
+            .await
+    }
+
+    pub async fn fetch_through_offers(
+        &self,
+        origin: &str,
+        destination: &str,
+        currency: &str,
+    ) -> Result<Arc<Vec<Offer>>, String> {
+        self.fetch_offers(origin, destination, currency, false, false)
+            .await
+    }
+
+    async fn fetch_offers(
+        &self,
+        origin: &str,
+        destination: &str,
+        currency: &str,
+        direct: bool,
+        store_it: bool,
+    ) -> Result<Arc<Vec<Offer>>, String> {
         let key = route_key(origin, destination, currency);
         let _permit = self
             .semaphore
@@ -154,7 +176,7 @@ impl Travelpayouts {
                     ("one_way", "true"),
                     ("unique", "false"),
                     ("sorting", "price"),
-                    ("direct", "true"),
+                    ("direct", if direct { "true" } else { "false" }),
                     ("currency", currency),
                     ("limit", "1000"),
                     ("page", "1"),
@@ -177,18 +199,22 @@ impl Travelpayouts {
                             }
                         };
                         if parsed.success {
-                            let offers = Arc::new(self.convert_offers(parsed.data.unwrap_or_default()));
-                            {
-                                let mut cache = self.cache.write().await;
-                                cache.insert(
-                                    key.clone(),
-                                    CacheEntry {
-                                        offers: offers.clone(),
-                                        fetched: Instant::now(),
-                                    },
-                                );
+                            let offers = Arc::new(
+                                self.convert_offers(parsed.data.unwrap_or_default(), !direct),
+                            );
+                            if direct {
+                                {
+                                    let mut cache = self.cache.write().await;
+                                    cache.insert(
+                                        key.clone(),
+                                        CacheEntry {
+                                            offers: offers.clone(),
+                                            fetched: Instant::now(),
+                                        },
+                                    );
+                                }
+                                self.maybe_evict().await;
                             }
-                            self.maybe_evict().await;
                             if store_it {
                                 if let Some(store) = &self.store {
                                     let filtered = self.filter_for_db(&offers);
@@ -243,7 +269,7 @@ impl Travelpayouts {
             .collect()
     }
 
-    fn convert_offers(&self, raw_offers: Vec<PriceOfferRaw>) -> Vec<Offer> {
+    fn convert_offers(&self, raw_offers: Vec<PriceOfferRaw>, allow_transfers: bool) -> Vec<Offer> {
         let mut offers = Vec::with_capacity(raw_offers.len());
         let now = Utc::now();
         for raw in raw_offers {
@@ -261,11 +287,13 @@ impl Travelpayouts {
             let Ok(depart) = DateTime::parse_from_rfc3339(&raw.departure_at) else {
                 continue;
             };
-            if raw.transfers.unwrap_or(0) != 0 {
+            let transfers = raw.transfers.unwrap_or(0);
+            if !allow_transfers && transfers != 0 {
                 continue;
             }
             let duration = raw.duration.unwrap_or(0);
-            if !(15..=2_160).contains(&duration) {
+            let max_duration = if allow_transfers { 10_080 } else { 2_160 };
+            if duration < 15 || duration > max_duration {
                 continue;
             }
             let fallback = *depart.offset();
@@ -348,7 +376,7 @@ impl Travelpayouts {
                 destination_tz,
                 fallback_offset: fallback,
                 price: raw.price,
-                transfers: 0,
+                transfers,
                 duration_min: duration,
                 airline: raw.airline.unwrap_or_default(),
                 flight_number: raw.flight_number.unwrap_or_default(),
