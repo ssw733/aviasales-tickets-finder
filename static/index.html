@@ -5,17 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-5">
+  <link rel="stylesheet" href="/style.css?v=20261029-6">
 </head>
 <body>
   <div id="app">
     <aside id="sidebar">
       <header class="brand">
-        <div>
-          <h1>Пути к цели</h1>
-          <p>Поиск дешёвых и быстрых связок рейсов по данным Travelpayouts</p>
-        </div>
-        <span class="badge">Rust</span>
+        <h1>Пути к цели</h1>
       </header>
 
       <section class="panel">
@@ -36,7 +32,6 @@
             <button type="button" class="add-country" data-side="origin">+</button>
           </div>
           <div id="origin-country-chips" class="chips"></div>
-          <div class="hint">Можно добавить несколько городов и стран: ввод, Enter или «+». До 300 аэропортов суммарно.</div>
         </div>
         <div id="origin-region-wrap" class="region-wrap hidden">
           <div class="coords-row">
@@ -74,7 +69,6 @@
             <button type="button" class="add-country" data-side="destination">+</button>
           </div>
           <div id="destination-country-chips" class="chips"></div>
-          <div class="hint">Можно добавить несколько городов и стран: ввод, Enter или «+». До 300 аэропортов суммарно.</div>
         </div>
         <div id="destination-region-wrap" class="region-wrap hidden">
           <div class="coords-row">
@@ -109,7 +103,6 @@
         </div>
         <div class="hint">Сначала проверяются прямые билеты. Если прямой дорогой, ищутся только варианты с пересадками, которые дешевле него. Макс. дней на пересадку относится к стыковкам между отдельными билетами.</div>
         <button id="search-button" class="primary">Искать маршрут</button>
-        <button id="share-button" class="secondary" type="button">Скопировать ссылку на поиск</button>
         <div id="status" class="status"></div>
       </section>
 
@@ -148,6 +141,6 @@
   <datalist id="city-list"></datalist>
   <datalist id="country-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-5"></script>
+  <script src="/app.js?v=20261029-6"></script>
 </body>
 </html>

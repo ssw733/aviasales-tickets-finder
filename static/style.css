@@ -70,19 +70,7 @@ body {
   line-height: 1.45;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid #c7d7fe;
-  background: var(--blue-soft);
-  color: var(--blue-dark);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
+
 
 .panel {
   background: var(--panel);
@@ -780,18 +768,6 @@ input[type="range"]:focus {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.secondary {
-  width: 100%;
-  height: 42px;
-  margin-top: 8px;
-  border: 1px solid #c7d7fe;
-  border-radius: 11px;
-  background: var(--blue-soft);
-  color: var(--blue-dark);
-  font-weight: 750;
-  cursor: pointer;
-}
 
-.secondary:hover {
-  background: #e3edff;
-}
+
+
