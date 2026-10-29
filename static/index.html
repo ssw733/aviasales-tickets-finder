@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Поиск маршрутов — Travelpayouts</title>
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/style.css?v=20261029">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header class="brand">
+        <div>
+          <h1>Пути к цели</h1>
+          <p>Поиск дешёвых и быстрых связок рейсов по данным Travelpayouts</p>
+        </div>
+        <span class="badge">Rust</span>
+      </header>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Откуда</h2>
+          <select id="origin-mode" class="mode-select">
+            <option value="city">Город</option>
+            <option value="country">Страна</option>
+            <option value="region">Регион</option>
+            <option value="any">Откуда угодно</option>
+          </select>
+        </div>
+        <div id="origin-city-wrap">
+          <input id="origin-city" class="city-input" list="city-list" placeholder="MOW, SVO, Москва" autocomplete="off" value="MOW">
+        </div>
+        <div id="origin-country-wrap" class="hidden">
+          <div class="country-picker">
+            <input id="origin-country" class="city-input" list="country-list" placeholder="RU, TR, Россия" autocomplete="off">
+            <button type="button" class="add-country" data-side="origin">+</button>
+          </div>
+          <div id="origin-country-chips" class="chips"></div>
+          <div class="hint">Можно перечислить несколько стран через запятую. До 200 аэропортов суммарно.</div>
+        </div>
+        <div id="origin-region-wrap" class="region-wrap hidden">
+          <div class="coords-row">
+            <span id="origin-coords">Точка не выбрана</span>
+            <button type="button" class="pick-button" data-pick="origin">Указать на карте</button>
+          </div>
+          <label class="slider-label">Радиус
+            <span class="slider-value" id="origin-radius-value">150 км</span>
+          </label>
+          <div class="slider-row">
+            <input id="origin-radius" type="range" min="5" max="5000" step="5" value="150">
+            <input id="origin-radius-num" type="number" min="5" max="5000" step="5" value="150">
+          </div>
+          <div id="origin-region-cities" class="chips"></div>
+        </div>
+        <div id="origin-any-note" class="note hidden">Проверяются все аэропорты из БД и RAM-графа, откуда есть рейсы в точку назначения.</div>
+        <label class="exclude-label">Исключить страны<input id="origin-exclude" placeholder="например, RU, TR" autocomplete="off"></label>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Куда</h2>
+          <select id="destination-mode" class="mode-select">
+            <option value="city">Город</option>
+            <option value="country">Страна</option>
+            <option value="region">Регион</option>
+            <option value="any">Куда угодно</option>
+          </select>
+        </div>
+        <div id="destination-city-wrap">
+          <input id="destination-city" class="city-input" list="city-list" placeholder="LED, AYT, Стамбул" autocomplete="off" value="LED">
+        </div>
+        <div id="destination-country-wrap" class="hidden">
+          <div class="country-picker">
+            <input id="destination-country" class="city-input" list="country-list" placeholder="RU, TR, Россия" autocomplete="off">
+            <button type="button" class="add-country" data-side="destination">+</button>
+          </div>
+          <div id="destination-country-chips" class="chips"></div>
+          <div class="hint">Можно перечислить несколько стран через запятую. До 200 аэропортов суммарно.</div>
+        </div>
+        <div id="destination-region-wrap" class="region-wrap hidden">
+          <div class="coords-row">
+            <span id="destination-coords">Точка не выбрана</span>
+            <button type="button" class="pick-button" data-pick="destination">Указать на карте</button>
+          </div>
+          <label class="slider-label">Радиус
+            <span class="slider-value" id="destination-radius-value">150 км</span>
+          </label>
+          <div class="slider-row">
+            <input id="destination-radius" type="range" min="5" max="5000" step="5" value="150">
+            <input id="destination-radius-num" type="number" min="5" max="5000" step="5" value="150">
+          </div>
+          <div id="destination-region-cities" class="chips"></div>
+        </div>
+        <div id="destination-any-note" class="note hidden">Проверяются все направления/аэропорты из БД и RAM-графа, а не только крупные хабы.</div>
+        <label class="exclude-label">Исключить страны<input id="destination-exclude" placeholder="например, RU, TR" autocomplete="off"></label>
+      </section>
+
+      <section class="panel">
+        <h2>Даты и ограничения</h2>
+        <div class="grid2">
+          <label>Вылет с<input id="depart-from" type="date"></label>
+          <label>Вылет до<input id="depart-to" type="date"></label>
+          <label>Прилёт с<input id="arrive-from" type="date"></label>
+          <label>Прилёт до<input id="arrive-to" type="date"></label>
+        </div>
+        <div class="hint">Даты можно не заполнять — будут использованы ближайшие 30/60 дней.</div>
+        <div class="grid2">
+          <label>Макс. пересадок<input id="max-transfers" type="number" min="0" max="5" value="2"></label>
+          <label>Макс. дней на пересадку<input id="max-connection-days" type="number" min="0" max="30" value="2"></label>
+        </div>
+        <div class="hint">Сначала проверяются прямые билеты. Если прямой дорогой, ищутся только варианты с пересадками, которые дешевле него. Макс. дней на пересадку относится к стыковкам между отдельными билетами. «Исключить страны» действует только на начальный/конечный аэропорт; пересадки в исключённой стране разрешены.</div>
+        <button id="search-button" class="primary">Искать маршрут</button>
+        <div id="status" class="status"></div>
+      </section>
+
+      <section class="panel meta-panel">
+        <div id="cache-info">Кэш: —</div>
+        <div id="db-info">БД/RAM: —</div>
+        <div id="search-info">Маршруты: —</div>
+        <div id="warnings"></div>
+      </section>
+    </aside>
+
+    <main id="main">
+      <div id="map"></div>
+      <section id="results">
+        <div id="results-head">
+          <div class="results-title">
+            <h2>Результаты</h2>
+            <div id="results-tabs" class="result-tabs hidden">
+              <button type="button" class="tab active" data-group="price">Цена</button>
+              <button type="button" class="tab" data-group="transfers">Пересадки</button>
+              <button type="button" class="tab" data-group="dates">Даты</button>
+              <button type="button" class="tab" data-group="duration">Время</button>
+            </div>
+          </div>
+          <span id="results-count"></span>
+        </div>
+        <div id="results-list" class="results-list">
+          <div class="empty-state">
+            Выберите точки и даты, затем нажмите «Искать маршрут». Клик по карточке рисует маршрут на карте, кнопка «Открыть билет» ведёт на Aviasales.
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <datalist id="city-list"></datalist>
+  <datalist id="country-list"></datalist>
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script src="/app.js?v=20261029"></script>
+</body>
+</html>
