@@ -928,7 +928,6 @@ fn merge_labels(map: HashMap<String, Vec<Label>>) -> Vec<Label> {
 fn pareto_search(
     offers: &[Offer],
     outgoing: &HashMap<String, Vec<usize>>,
-    through_offers: &[usize],
     origins: &[String],
     dests: Option<&[String]>,
     constraints: &Constraints,
@@ -936,7 +935,6 @@ fn pareto_search(
 ) -> Vec<PathResult> {
     let dest_set: Option<HashSet<&str>> =
         dests.map(|values| values.iter().map(String::as_str).collect());
-    let origin_set: HashSet<&str> = origins.iter().map(String::as_str).collect();
     let mut frontier: Vec<Label> = origins
         .iter()
         .map(|city| Label {
@@ -952,38 +950,6 @@ fn pareto_search(
         })
         .collect();
     let mut results: Vec<PathResult> = Vec::new();
-    for &offer_id in through_offers {
-        let offer = &offers[offer_id];
-        if !origin_set.contains(offer.origin_airport.as_str()) {
-            continue;
-        }
-        if let Some(set) = &dest_set {
-            if !set.contains(offer.destination_airport.as_str()) {
-                continue;
-            }
-        }
-        if offer.transfers > constraints.max_transfers {
-            continue;
-        }
-        if offer.depart_local_date < constraints.depart_from
-            || offer.depart_local_date > constraints.depart_to
-        {
-            continue;
-        }
-        if offer.arrive_local_date < constraints.arrive_from
-            || offer.arrive_local_date > constraints.arrive_to
-        {
-            continue;
-        }
-        results.push(PathResult {
-            offer_ids: vec![offer_id],
-            price: offer.price,
-            travel_min: offer.duration_min,
-            transfers: offer.transfers,
-            depart_at: offer.depart_at,
-            arrive_at: offer.arrive_at,
-        });
-    }
     let mut expansions: usize = 0;
     let min_connection = Duration::minutes(constraints.min_connection_minutes as i64);
     let max_slice_gap =
@@ -1724,52 +1690,6 @@ pub async fn run_search(
         return Err("Не удалось определить точки отправления или назначения.".to_string());
     }
 
-    let mut target_through_offers: Vec<Offer> = Vec::new();
-    if !origin_any && !dest_any && origins.len() * dests.len() <= 32 {
-        let pairs: Vec<(String, String)> = origins
-            .iter()
-            .flat_map(|origin| {
-                dests
-                    .iter()
-                    .map(move |destination| (origin.clone(), destination.clone()))
-            })
-            .collect();
-        let fetched = futures::stream::iter(pairs.into_iter().map(|(origin, destination)| {
-            let api = api.clone();
-            let currency = currency.clone();
-            async move { api.fetch_route_offers(&origin, &destination, &currency, true).await }
-        }))
-        .buffer_unordered(8)
-        .collect::<Vec<_>>()
-        .await;
-        for result in fetched {
-            if let Ok(offers) = result {
-                for offer in offers.iter() {
-                    if offer.transfers == 0 || offer.transfers > constraints.max_transfers {
-                        continue;
-                    }
-                    if offer.depart_local_date < constraints.depart_from
-                        || offer.depart_local_date > constraints.depart_to
-                        || offer.arrive_local_date < constraints.arrive_from
-                        || offer.arrive_local_date > constraints.arrive_to
-                    {
-                        continue;
-                    }
-                    target_through_offers.push(offer.clone());
-                }
-            }
-        }
-        target_through_offers.sort_by(|a, b| {
-            a.price
-                .partial_cmp(&b.price)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.depart_at.cmp(&b.depart_at))
-        });
-        target_through_offers.dedup_by(|a, b| {
-            a.link == b.link && a.depart_at == b.depart_at && (a.price - b.price).abs() < 0.01
-        });
-    }
-
     if graph_usable {
         if dest_any {
             let mut seen: HashSet<String> = dests.iter().cloned().collect();
@@ -1823,7 +1743,6 @@ pub async fn run_search(
         graph_results = pareto_search(
             &graph.offers,
             &graph.outgoing,
-            &graph.through_offers,
             &origins,
             destination_arg,
             &constraints,
@@ -1865,7 +1784,6 @@ pub async fn run_search(
 
             let mut all_offers: Vec<Offer> = Vec::new();
             let mut outgoing: HashMap<String, Vec<usize>> = HashMap::new();
-            let mut through_offers: Vec<usize> = Vec::new();
             let mut routes_failed = 0usize;
             let mut fetch_errors: Vec<String> = Vec::new();
 
@@ -1893,16 +1811,15 @@ pub async fn run_search(
                             {
                                 continue;
                             }
+                            if offer.transfers > 0 {
+                                continue;
+                            }
                             let index = all_offers.len();
                             all_offers.push(offer.clone());
-                            if offer.transfers == 0 {
-                                outgoing
-                                    .entry(offer.origin_airport.clone())
-                                    .or_default()
-                                    .push(index);
-                            } else {
-                                through_offers.push(index);
-                            }
+                            outgoing
+                                .entry(offer.origin_airport.clone())
+                                .or_default()
+                                .push(index);
                         }
                     }
                     Err(error) => {
@@ -1944,7 +1861,6 @@ pub async fn run_search(
             let mut results = pareto_search(
                 &all_offers,
                 &outgoing,
-                &through_offers,
                 &origins,
                 Some(&dests),
                 &constraints,
@@ -1962,7 +1878,7 @@ pub async fn run_search(
             )
         };
 
-    let (mut itineraries, mut groups) = build_response(
+    let (itineraries, groups) = build_response(
         &data,
         source.offers(),
         results,
@@ -1970,99 +1886,6 @@ pub async fn run_search(
         &optimize,
         max_results,
     );
-    if !target_through_offers.is_empty() {
-        let base_links: HashSet<String> = itineraries
-            .iter()
-            .flat_map(|itinerary| itinerary.legs.iter().map(|leg| leg.link.clone()))
-            .collect();
-        target_through_offers.retain(|offer| !base_links.contains(&offer.link));
-    }
-    if !target_through_offers.is_empty() {
-        let target_results: Vec<PathResult> = target_through_offers
-            .iter()
-            .enumerate()
-            .map(|(index, offer)| PathResult {
-                offer_ids: vec![index],
-                price: offer.price,
-                travel_min: offer.duration_min,
-                transfers: offer.transfers,
-                depart_at: offer.depart_at,
-                arrive_at: offer.arrive_at,
-            })
-            .collect();
-        let (target_itineraries, target_groups) = build_response(
-            &data,
-            &target_through_offers,
-            target_results,
-            &currency,
-            &optimize,
-            max_results,
-        );
-        if !target_itineraries.is_empty() {
-            let base_len = itineraries.len();
-            itineraries.extend(target_itineraries);
-            let shifted = |values: &[usize]| -> Vec<usize> {
-                values.iter().map(|value| value + base_len).collect()
-            };
-            let timestamp = |value: &str| -> i64 {
-                chrono::DateTime::parse_from_rfc3339(value)
-                    .map(|date| date.timestamp())
-                    .unwrap_or(0)
-            };
-            groups.price.extend(shifted(&target_groups.price));
-            groups.transfers.extend(shifted(&target_groups.transfers));
-            groups.dates.extend(shifted(&target_groups.dates));
-            groups.duration.extend(shifted(&target_groups.duration));
-            groups.price.sort_by(|a, b| {
-                let ia = &itineraries[*a];
-                let ib = &itineraries[*b];
-                ia.total_price
-                    .partial_cmp(&ib.total_price)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
-                    .then_with(|| ia.travel_minutes.cmp(&ib.travel_minutes))
-                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
-            });
-            groups.transfers.sort_by(|a, b| {
-                let ia = &itineraries[*a];
-                let ib = &itineraries[*b];
-                ia.total_transfers
-                    .cmp(&ib.total_transfers)
-                    .then_with(|| {
-                        ia.total_price
-                            .partial_cmp(&ib.total_price)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .then_with(|| ia.travel_minutes.cmp(&ib.travel_minutes))
-                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
-            });
-            groups.dates.sort_by(|a, b| {
-                let ia = &itineraries[*a];
-                let ib = &itineraries[*b];
-                timestamp(&ia.depart_at)
-                    .cmp(&timestamp(&ib.depart_at))
-                    .then_with(|| {
-                        ia.total_price
-                            .partial_cmp(&ib.total_price)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
-            });
-            groups.duration.sort_by(|a, b| {
-                let ia = &itineraries[*a];
-                let ib = &itineraries[*b];
-                ia.travel_minutes
-                    .cmp(&ib.travel_minutes)
-                    .then_with(|| {
-                        ia.total_price
-                            .partial_cmp(&ib.total_price)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .then_with(|| ia.total_transfers.cmp(&ib.total_transfers))
-                    .then_with(|| ia.depart_at.cmp(&ib.depart_at))
-            });
-        }
-    }
     if itineraries.is_empty() {
         warnings.push(
             "Маршруты не найдены. Попробуйте расширить окна дат, увеличить радиус/лимит городов, число пересадок или лимит маршрутов."

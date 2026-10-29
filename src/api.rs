@@ -154,7 +154,7 @@ impl Travelpayouts {
                     ("one_way", "true"),
                     ("unique", "false"),
                     ("sorting", "price"),
-                    ("direct", "false"),
+                    ("direct", "true"),
                     ("currency", currency),
                     ("limit", "1000"),
                     ("page", "1"),
@@ -261,10 +261,11 @@ impl Travelpayouts {
             let Ok(depart) = DateTime::parse_from_rfc3339(&raw.departure_at) else {
                 continue;
             };
-            let transfers = raw.transfers.unwrap_or(0);
+            if raw.transfers.unwrap_or(0) != 0 {
+                continue;
+            }
             let duration = raw.duration.unwrap_or(0);
-            let max_duration = if transfers > 0 { 10_080 } else { 2_160 };
-            if duration < 15 || duration > max_duration {
+            if !(15..=2_160).contains(&duration) {
                 continue;
             }
             let fallback = *depart.offset();
@@ -347,7 +348,7 @@ impl Travelpayouts {
                 destination_tz,
                 fallback_offset: fallback,
                 price: raw.price,
-                transfers,
+                transfers: 0,
                 duration_min: duration,
                 airline: raw.airline.unwrap_or_default(),
                 flight_number: raw.flight_number.unwrap_or_default(),

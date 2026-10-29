@@ -706,7 +706,7 @@ function itineraryHtml(itinerary, index) {
           className: "pill kind-self",
         }
       : {
-          text: "Единый билет",
+          text: "Прямой рейс",
           className: "pill kind-single",
         };
   const firstLink = safeUrl(legs[0]?.link);

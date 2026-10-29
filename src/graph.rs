@@ -10,7 +10,6 @@ use tokio::sync::RwLock;
 pub struct Graph {
     pub offers: Vec<Offer>,
     pub outgoing: HashMap<String, Vec<usize>>,
-    pub through_offers: Vec<usize>,
     pub by_route: HashMap<(String, String), Vec<usize>>,
     pub destinations_by_origin: HashMap<String, Vec<String>>,
     pub origins_by_destination: HashMap<String, Vec<String>>,
@@ -24,7 +23,6 @@ impl Graph {
         Self {
             offers: Vec::new(),
             outgoing: HashMap::new(),
-            through_offers: Vec::new(),
             by_route: HashMap::new(),
             destinations_by_origin: HashMap::new(),
             origins_by_destination: HashMap::new(),
@@ -50,10 +48,8 @@ impl Graph {
         let mut outgoing: HashMap<String, Vec<usize>> = HashMap::new();
         let mut by_route: HashMap<(String, String), Vec<usize>> = HashMap::new();
         let mut route_set: HashSet<(String, String)> = HashSet::new();
-        let mut through_offers: Vec<usize> = Vec::new();
         for (index, offer) in offers.iter().enumerate() {
             if offer.transfers > 0 {
-                through_offers.push(index);
                 continue;
             }
             outgoing
@@ -89,7 +85,6 @@ impl Graph {
         Self {
             offers,
             outgoing,
-            through_offers,
             by_route,
             destinations_by_origin,
             origins_by_destination,
