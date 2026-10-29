@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-11">
+  <link rel="stylesheet" href="/style.css?v=20261029-12">
 </head>
 <body>
   <div id="app">
@@ -104,7 +104,7 @@
           <label>Прилёт с<input id="arrive-from" type="date"></label>
           <label>Прилёт до<input id="arrive-to" type="date"></label>
         </div>
-        <div class="hint">Даты можно не заполнять — будут использованы ближайшие 30/60 дней.</div>
+        <div class="hint">Даты можно не заполнять — будет использован весь доступный период.</div>
         <div class="grid2">
           <label>Макс. пересадок<input id="max-transfers" type="number" min="0" max="5" value="2"></label>
           <label>Макс. дней на пересадку<input id="max-connection-days" type="number" min="0" max="30" value="2"></label>
@@ -158,6 +158,6 @@
   <datalist id="country-list"></datalist>
   <datalist id="exclude-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-11"></script>
+  <script src="/app.js?v=20261029-12"></script>
 </body>
 </html>

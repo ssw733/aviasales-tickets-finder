@@ -1554,14 +1554,17 @@ pub async fn run_search(
         .unwrap_or(1.0);
 
     let today = Utc::now().date_naive();
+    let horizon_days: i64 = std::env::var("DB_HORIZON_DAYS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(400);
+    let horizon = today + Duration::days(horizon_days);
     let depart_from = request.depart_from.unwrap_or(today);
-    let depart_to = request
-        .depart_to
-        .unwrap_or(depart_from + Duration::days(30));
+    let depart_to = request.depart_to.unwrap_or(horizon.max(depart_from));
     let arrive_from = request.arrive_from.unwrap_or(depart_from);
     let arrive_to = request
         .arrive_to
-        .unwrap_or(depart_to.max(depart_from) + Duration::days(30));
+        .unwrap_or((horizon + Duration::days(30)).max(depart_to));
 
     if depart_from > depart_to {
         return Err("Дата начала вылета позже даты окончания вылета.".to_string());
