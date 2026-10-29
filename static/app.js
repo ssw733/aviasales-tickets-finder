@@ -3,6 +3,8 @@ const state = {
   destination: { mode: "place", point: null, radius: 150, places: [], excluded: [] },
   pickMode: null,
   itineraries: [],
+  directions: [],
+  activeDirectionKey: null,
   groups: { price: [], transfers: [], dates: [], duration: [] },
   activeGroup: "price",
   activeIndex: -1,
@@ -744,6 +746,59 @@ function itineraryDirection(itinerary) {
   };
 }
 
+function openVariants(key) {
+  const direction = state.directions.find((item) => item.key === key);
+  if (!direction) return;
+  state.activeDirectionKey = key;
+  const dates = new Map();
+  direction.variants.forEach((index) => {
+    const itinerary = state.itineraries[index];
+    const dateKey = (itinerary.depart_at || "").slice(0, 10);
+    if (!dates.has(dateKey)) dates.set(dateKey, []);
+    dates.get(dateKey).push(index);
+  });
+  const sections = [...dates.entries()]
+    .map(([dateKey, indexes]) => {
+      const sample = state.itineraries[indexes[0]];
+      return `
+        <section class="variant-date-section">
+          <div class="variant-date-title">${esc(dateParts(sample.depart_at).date)} · ${
+            indexes.length
+          } ${plural(indexes.length, ["вариант", "варианта", "вариантов"])}</div>
+          <div class="variant-date-list">
+            ${indexes
+              .map(
+                (index) =>
+                  `<div class="variant-wrap">${itineraryHtml(
+                    state.itineraries[index],
+                    index
+                  )}</div>`
+              )
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+  $("variants-title").textContent = `${direction.originCode} → ${direction.destCode} · ${direction.originName} → ${direction.destName}`;
+  $("variants-content").innerHTML = sections;
+  $("variants-modal").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  document.querySelectorAll("#variants-content .itinerary").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
+      drawItinerary(Number(card.dataset.index));
+    });
+  });
+  drawItinerary(direction.best);
+}
+
+function closeVariants() {
+  $("variants-modal").classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  state.activeDirectionKey = null;
+}
+
 function renderGroup(group) {
   state.activeGroup = group;
   const order =
@@ -772,84 +827,55 @@ function renderGroup(group) {
       (rank.has(b.best) ? rank.get(b.best) : 1e9)
   );
 
+  state.directions = directions;
   const list = $("results-list");
   list.innerHTML = directions
     .map((direction) => {
       const best = state.itineraries[direction.best];
-      const dates = new Map();
-      direction.variants.forEach((index) => {
-        const itinerary = state.itineraries[index];
-        const key = (itinerary.depart_at || "").slice(0, 10);
-        if (!dates.has(key)) dates.set(key, []);
-        dates.get(key).push(index);
-      });
-      const dateKeys = [...dates.keys()];
-      const toggleLabel =
-        dateKeys.length > 1
-          ? `Есть другие даты (${dateKeys.length})`
-          : `Все варианты (${direction.variants.length})`;
-      const head = `
-        <div class="destination-head">
-          <span class="destination-code">${esc(direction.originCode)} → ${esc(
-            direction.destCode
-          )} · ${esc(direction.originName)} → ${esc(direction.destName)}</span>
-          ${
-            direction.variants.length > 1
-              ? `<span class="details-toggle">${esc(toggleLabel)}</span>`
-              : ""
-          }
-        </div>
-      `;
-      if (direction.variants.length <= 1) {
-        return `<div class="destination-group" data-direction="${esc(
-          direction.key
-        )}">${head}${itineraryHtml(best, direction.best)}</div>`;
-      }
-      const variantBlocks = [...dates.entries()]
-        .map(([dateKey, indexes]) => {
-          const sample = state.itineraries[indexes[0]];
-          const label = dateParts(sample.depart_at).date;
-          return `
-            <div class="variant-date">
-              <div class="variant-date-head">${esc(label)} · ${indexes.length} ${plural(
-                indexes.length,
-                ["вариант", "варианта", "вариантов"]
-              )}</div>
-              ${indexes
-                .map(
-                  (index) =>
-                    `<div class="variant-wrap">${itineraryHtml(
-                      state.itineraries[index],
-                      index
-                    )}</div>`
-                )
-                .join("")}
-            </div>
-          `;
-        })
-        .join("");
+      const dateKeys = new Set(
+        direction.variants.map((index) =>
+          (state.itineraries[index].depart_at || "").slice(0, 10)
+        )
+      );
+      const label =
+        dateKeys.size > 1
+          ? `Есть другие даты (${dateKeys.size})`
+          : `Варианты (${direction.variants.length})`;
       return `
-        <details class="destination-group" data-direction="${esc(direction.key)}">
-          <summary>${head}${itineraryHtml(best, direction.best)}</summary>
-          <div class="variants-list">${variantBlocks}</div>
-        </details>
+        <div class="destination-group" data-direction="${esc(direction.key)}">
+          <div class="destination-head">
+            <span class="destination-code">${esc(direction.originCode)} → ${esc(
+              direction.destCode
+            )} · ${esc(direction.originName)} → ${esc(direction.destName)}</span>
+            ${
+              direction.variants.length > 1
+                ? `<button type="button" class="details-toggle variants-open">${esc(
+                    label
+                  )}</button>`
+                : ""
+            }
+          </div>
+          ${itineraryHtml(best, direction.best)}
+        </div>
       `;
     })
     .join("");
 
-  document.querySelectorAll(".variants-list .itinerary").forEach((card) => {
+  document.querySelectorAll(".destination-group").forEach((card) => {
     card.addEventListener("click", (event) => {
       if (event.target.closest("a")) return;
-      drawItinerary(Number(card.dataset.index));
+      const direction = state.directions.find(
+        (item) => item.key === card.dataset.direction
+      );
+      if (!direction) return;
+      if (direction.variants.length > 1) {
+        openVariants(direction.key);
+      } else {
+        drawItinerary(direction.best);
+      }
     });
   });
-  document.querySelectorAll(".destination-group > summary").forEach((summary) => {
-    summary.addEventListener("click", (event) => {
-      if (event.target.closest("a")) return;
-      const card = summary.querySelector(".itinerary");
-      if (card) drawItinerary(Number(card.dataset.index));
-    });
-  });
+
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.group === group);
   });
@@ -864,6 +890,7 @@ function renderGroup(group) {
 }
 
 function renderResults(data) {
+  closeVariants();
   state.itineraries = Array.isArray(data.itineraries) ? data.itineraries : [];
   state.groups = data.groups || {
     price: state.itineraries.map((_, index) => index),
@@ -1003,6 +1030,14 @@ function init() {
     const tab = event.target.closest(".tab");
     if (!tab) return;
     renderGroup(tab.dataset.group);
+  });
+  $("variants-back").addEventListener("click", closeVariants);
+  $("variants-close").addEventListener("click", closeVariants);
+  $("variants-modal").addEventListener("click", (event) => {
+    if (event.target.id === "variants-modal") closeVariants();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeVariants();
   });
   refreshDbInfo();
 }
