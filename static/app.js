@@ -1,6 +1,6 @@
 const state = {
-  origin: { mode: "place", point: null, radius: 150, places: [] },
-  destination: { mode: "place", point: null, radius: 150, places: [] },
+  origin: { mode: "place", point: null, radius: 150, places: [], excluded: [] },
+  destination: { mode: "place", point: null, radius: 150, places: [], excluded: [] },
   pickMode: null,
   itineraries: [],
   groups: { price: [], transfers: [], dates: [], duration: [] },
@@ -359,6 +359,101 @@ async function addPlacesFromInput(side) {
   }
 }
 
+function renderExcludeChips(side) {
+  const target = $(`${side}-exclude-chips`);
+  const places = state[side].excluded;
+  target.innerHTML = places
+    .map(
+      (place) =>
+        `<button type="button" class="chip exclude-chip" data-side="${side}" data-code="${esc(
+          place.code
+        )}" title="Удалить">− ${esc(place.code)} · ${esc(place.name)} ×</button>`
+    )
+    .join("");
+  target.querySelectorAll(".exclude-chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      state[side].excluded = state[side].excluded.filter(
+        (place) => place.code !== button.dataset.code
+      );
+      renderExcludeChips(side);
+    });
+  });
+}
+
+function bindExcludeAutocomplete(inputId) {
+  const input = $(inputId);
+  let timer = null;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const query = input.value.trim();
+    if (query.length < 2) return;
+    timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/places?q=${encodeURIComponent(query)}&limit=20`);
+        if (!response.ok) return;
+        const places = await response.json();
+        $("exclude-list").innerHTML = places
+          .map(
+            (place) =>
+              `<option value="${esc(place.code)}">${esc(place.code)} — ${esc(place.name)}${
+                place.kind === "country" ? " (страна)" : ""
+              }</option>`
+          )
+          .join("");
+      } catch (error) {
+        return;
+      }
+    }, 220);
+  });
+}
+
+async function addExcludedFromInput(side) {
+  const input = $(`${side}-exclude`);
+  const parts = input.value
+    .split(/[,\n]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return;
+  const errors = [];
+  for (const part of parts) {
+    try {
+      const response = await fetch(`/api/places?q=${encodeURIComponent(part)}&limit=20`);
+      if (!response.ok) {
+        errors.push(part);
+        continue;
+      }
+      const items = await response.json();
+      let place = items.find((item) => item.code.toUpperCase() === part.toUpperCase());
+      if (!place) {
+        place = items.find((item) => item.name.toLowerCase() === part.toLowerCase());
+      }
+      if (!place) place = items[0];
+      if (!place) {
+        errors.push(part);
+        continue;
+      }
+      if (
+        !state[side].excluded.some(
+          (item) => item.code === place.code && item.kind === place.kind
+        )
+      ) {
+        state[side].excluded.push({
+          kind: place.kind,
+          code: place.code,
+          name: place.name,
+        });
+      }
+    } catch (error) {
+      errors.push(part);
+    }
+  }
+  input.value = "";
+  renderExcludeChips(side);
+  if (errors.length > 0) {
+    setStatus(`Не найдено: ${errors.join(", ")}`, "error");
+  }
+}
+
 function endpointPayload(which) {
   const item = state[which];
   if (item.mode === "any") {
@@ -418,8 +513,14 @@ function buildPayload() {
     destination: endpointPayload("destination"),
     max_transfers: numberValue("max-transfers"),
     max_connection_days: numberValue("max-connection-days"),
-    exclude_origin_places: splitList($("origin-exclude").value),
-    exclude_destination_places: splitList($("destination-exclude").value),
+    exclude_origin_places: [
+      ...state.origin.excluded.map((place) => place.code),
+      ...splitList($("origin-exclude").value),
+    ],
+    exclude_destination_places: [
+      ...state.destination.excluded.map((place) => place.code),
+      ...splitList($("destination-exclude").value),
+    ],
   };
   const dates = {
     depart_from: $("depart-from").value,
@@ -918,14 +1019,25 @@ function init() {
 
   bindPlaceAutocomplete("origin-country");
   bindPlaceAutocomplete("destination-country");
+  bindExcludeAutocomplete("origin-exclude");
+  bindExcludeAutocomplete("destination-exclude");
   document.querySelectorAll(".add-country").forEach((button) => {
     button.addEventListener("click", () => addPlacesFromInput(button.dataset.side));
+  });
+  document.querySelectorAll(".add-exclude").forEach((button) => {
+    button.addEventListener("click", () => addExcludedFromInput(button.dataset.side));
   });
   ["origin", "destination"].forEach((side) => {
     $(`${side}-country`).addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         addPlacesFromInput(side);
+      }
+    });
+    $(`${side}-exclude`).addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addExcludedFromInput(side);
       }
     });
   });

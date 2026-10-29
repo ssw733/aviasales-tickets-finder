@@ -725,7 +725,8 @@ input[type="range"]:focus {
   gap: 8px;
 }
 
-.add-country {
+.add-country,
+.add-exclude {
   height: 40px;
   border: 1px solid #c7d7fe;
   border-radius: 10px;
@@ -747,26 +748,12 @@ input[type="range"]:focus {
 
 .exclude-label {
   margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.exclude-input {
-  width: 100%;
-  min-height: 40px;
-  border: 1px dashed #d0d5dd;
-  border-radius: 10px;
-  background: #fff;
-  color: var(--ink);
-  padding: 9px 11px;
-  outline: none;
-  resize: vertical;
-  font: inherit;
-}
 
-.exclude-input:focus {
-  border-color: #84adff;
-  border-style: solid;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
 
 
 

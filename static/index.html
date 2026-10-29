@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-6">
+  <link rel="stylesheet" href="/style.css?v=20261029-7">
 </head>
 <body>
   <div id="app">
@@ -48,7 +48,12 @@
           <div id="origin-region-cities" class="chips"></div>
         </div>
         <div id="origin-any-note" class="note hidden">Проверяются все аэропорты из БД и RAM-графа, откуда есть рейсы в точку назначения.</div>
-        <label class="exclude-label">Исключить города/страны<textarea id="origin-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
+        <div class="exclude-label">Исключить города/страны</div>
+        <div class="country-picker exclude-picker">
+          <input id="origin-exclude" class="city-input" list="exclude-list" placeholder="Город или страна" autocomplete="off">
+          <button type="button" class="add-exclude" data-side="origin">−</button>
+        </div>
+        <div id="origin-exclude-chips" class="chips"></div>
       </section>
 
       <section class="panel">
@@ -85,7 +90,12 @@
           <div id="destination-region-cities" class="chips"></div>
         </div>
         <div id="destination-any-note" class="note hidden">Проверяются все направления/аэропорты из БД и RAM-графа, а не только крупные хабы.</div>
-        <label class="exclude-label">Исключить города/страны<textarea id="destination-exclude" class="exclude-input" rows="1" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"></textarea></label>
+        <div class="exclude-label">Исключить города/страны</div>
+        <div class="country-picker exclude-picker">
+          <input id="destination-exclude" class="city-input" list="exclude-list" placeholder="Город или страна" autocomplete="off">
+          <button type="button" class="add-exclude" data-side="destination">−</button>
+        </div>
+        <div id="destination-exclude-chips" class="chips"></div>
       </section>
 
       <section class="panel">
@@ -140,7 +150,8 @@
 
   <datalist id="city-list"></datalist>
   <datalist id="country-list"></datalist>
+  <datalist id="exclude-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-6"></script>
+  <script src="/app.js?v=20261029-7"></script>
 </body>
 </html>
