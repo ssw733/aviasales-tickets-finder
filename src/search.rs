@@ -651,10 +651,16 @@ async fn resolve_endpoints(
                     }
                 }
             }
-            warnings.push(
-                "Режим «куда угодно» проверяет все направления из RAM-графа (в пределах технического лимита)."
-                    .to_string(),
-            );
+            if !exclude_dests.is_empty() {
+                for (_, destination) in &graph.route_set {
+                    if seen.insert(destination.clone()) {
+                        candidates.push(destination.clone());
+                        if candidates.len() >= MAX_ANY_CANDIDATES {
+                            break;
+                        }
+                    }
+                }
+            }
         } else {
             for origin in &origins {
                 match api.get_city_directions(origin, currency).await {
