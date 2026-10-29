@@ -746,6 +746,76 @@ function itineraryDirection(itinerary) {
   };
 }
 
+let directionSpyFrame = null;
+let variantsSpyFrame = null;
+
+function scheduleDirectionSpy() {
+  if (directionSpyFrame) return;
+  directionSpyFrame = requestAnimationFrame(() => {
+    directionSpyFrame = null;
+    if (!$("variants-modal").classList.contains("hidden")) return;
+    updateRouteFromDirections();
+  });
+}
+
+function updateRouteFromDirections() {
+  const cards = [...document.querySelectorAll("#results-list .destination-group")];
+  if (cards.length === 0) return;
+  const results = $("results");
+  const scrollable = results.scrollHeight > results.clientHeight + 4;
+  const bounds = scrollable
+    ? results.getBoundingClientRect()
+    : { top: 0, bottom: window.innerHeight };
+  let bestCard = null;
+  let bestScore = Infinity;
+  cards.forEach((card) => {
+    const rect = card.getBoundingClientRect();
+    if (rect.bottom < bounds.top || rect.top > bounds.bottom) return;
+    const score = Math.abs(rect.top - bounds.top);
+    if (score < bestScore) {
+      bestScore = score;
+      bestCard = card;
+    }
+  });
+  if (!bestCard) return;
+  const index = Number(bestCard.dataset.bestIndex);
+  if (!Number.isNaN(index) && index !== state.activeIndex) {
+    drawItinerary(index);
+  }
+}
+
+function scheduleVariantsSpy() {
+  if (variantsSpyFrame) return;
+  variantsSpyFrame = requestAnimationFrame(() => {
+    variantsSpyFrame = null;
+    updateRouteFromVariants();
+  });
+}
+
+function updateRouteFromVariants() {
+  if ($("variants-modal").classList.contains("hidden")) return;
+  const container = $("variants-content");
+  const cards = [...container.querySelectorAll(".itinerary")];
+  if (cards.length === 0) return;
+  const bounds = container.getBoundingClientRect();
+  let bestCard = null;
+  let bestScore = Infinity;
+  cards.forEach((card) => {
+    const rect = card.getBoundingClientRect();
+    if (rect.bottom < bounds.top || rect.top > bounds.bottom) return;
+    const score = Math.abs(rect.top - bounds.top - 8);
+    if (score < bestScore) {
+      bestScore = score;
+      bestCard = card;
+    }
+  });
+  if (!bestCard) return;
+  const index = Number(bestCard.dataset.index);
+  if (!Number.isNaN(index) && index !== state.activeIndex) {
+    drawItinerary(index);
+  }
+}
+
 function openVariants(key) {
   const direction = state.directions.find((item) => item.key === key);
   if (!direction) return;
@@ -842,7 +912,9 @@ function renderGroup(group) {
           ? `Есть другие даты (${dateKeys.size})`
           : `Варианты (${direction.variants.length})`;
       return `
-        <div class="destination-group" data-direction="${esc(direction.key)}">
+        <div class="destination-group" data-direction="${esc(
+          direction.key
+        )}" data-best-index="${direction.best}">
           <div class="destination-head">
             <span class="destination-code">${esc(direction.originCode)} → ${esc(
               direction.destCode
@@ -1030,6 +1102,11 @@ function init() {
     const tab = event.target.closest(".tab");
     if (!tab) return;
     renderGroup(tab.dataset.group);
+  });
+  $("results").addEventListener("scroll", scheduleDirectionSpy, { passive: true });
+  window.addEventListener("scroll", scheduleDirectionSpy, { passive: true });
+  $("variants-content").addEventListener("scroll", scheduleVariantsSpy, {
+    passive: true,
   });
   $("variants-back").addEventListener("click", closeVariants);
   $("variants-close").addEventListener("click", closeVariants);
