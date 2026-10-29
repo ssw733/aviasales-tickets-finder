@@ -172,11 +172,9 @@ function updateModeUI(which) {
   const cityWrap = $(`${which}-city-wrap`);
   const placeWrap = $(`${which}-country-wrap`);
   const regionWrap = $(`${which}-region-wrap`);
-  const anyNote = $(`${which}-any-note`);
   cityWrap.classList.add("hidden");
   placeWrap.classList.toggle("hidden", mode !== "place");
   regionWrap.classList.toggle("hidden", mode !== "region");
-  anyNote.classList.toggle("hidden", mode !== "any");
   if (mode !== "region") {
     removeCircle(which);
     clearLayer(state[which === "origin" ? "originPreviewLayer" : "destinationPreviewLayer"]);
