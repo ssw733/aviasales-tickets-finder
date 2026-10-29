@@ -61,7 +61,7 @@ impl BulkConfig {
                 .to_lowercase(),
             hours,
             timezone,
-            batch_origins: env_usize("BULK_BATCH_ORIGINS", 40).clamp(1, 2000),
+            batch_origins: env_usize("BULK_BATCH_ORIGINS", 40).clamp(1, 20_000),
             routes_per_origin: env_usize("BULK_ROUTES_PER_ORIGIN", 50).clamp(1, 500),
             discovery_limit: env_usize("BULK_DISCOVERY_LIMIT", 120).clamp(1, 200),
             concurrency: env_usize("BULK_CONCURRENCY", 8).clamp(1, 16),
@@ -236,7 +236,11 @@ async fn run_batch(
         return Ok(());
     }
 
-    tracing::info!(origins = ?origins, "bulk refresh batch started");
+    tracing::info!(
+        origin_count = origins.len(),
+        first_origins = ?origins.iter().take(10).collect::<Vec<_>>(),
+        "bulk refresh batch started"
+    );
     let mut total_routes = 0usize;
     let mut total_offers = 0usize;
     let mut errors = 0usize;

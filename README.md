@@ -37,7 +37,7 @@ cargo run --release
 | `DB_PATH` | `data/pathfinder.db` | SQLite |
 | `DB_HORIZON_DAYS` | `400` | горизонт дат в БД/RAM |
 | `DIRECT_PRICE_MARGIN` | `1.0` | насколько дешевле прямого должны быть пересадки |
-| `BULK_BATCH_ORIGINS` | `1000` | городов за один батч цен |
+| `BULK_BATCH_ORIGINS` | `10000` | городов за один батч цен |
 | `BULK_HOURS` | `2,8,14,20` | часы запуска батчей |
 | `BULK_TZ` | `Europe/Moscow` | таймзона расписания |
 | `DISCOVERY_INTERVAL_HOURS` | `12` | период discovery по всем городам |
