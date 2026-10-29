@@ -412,6 +412,123 @@ function splitList(value) {
     .filter(Boolean);
 }
 
+function encodeState(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeState(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function currentUiState() {
+  return {
+    v: 1,
+    origin: {
+      mode: state.origin.mode,
+      point: state.origin.point,
+      radius: state.origin.radius,
+      places: state.origin.places,
+    },
+    destination: {
+      mode: state.destination.mode,
+      point: state.destination.point,
+      radius: state.destination.radius,
+      places: state.destination.places,
+    },
+    origin_place_input: $("origin-country").value,
+    destination_place_input: $("destination-country").value,
+    depart_from: $("depart-from").value,
+    depart_to: $("depart-to").value,
+    arrive_from: $("arrive-from").value,
+    arrive_to: $("arrive-to").value,
+    max_transfers: $("max-transfers").value,
+    max_connection_days: $("max-connection-days").value,
+    exclude_origin: $("origin-exclude").value,
+    exclude_destination: $("destination-exclude").value,
+  };
+}
+
+function updateUrlFromState() {
+  try {
+    const encoded = encodeState(currentUiState());
+    const url = `${location.pathname}?s=${encoded}`;
+    history.replaceState(null, "", url);
+  } catch (error) {
+    return;
+  }
+}
+
+function restoreState(data) {
+  if (!data || data.v !== 1) return false;
+  ["origin", "destination"].forEach((side) => {
+    const source = data[side] || {};
+    const mode = ["place", "region", "any"].includes(source.mode)
+      ? source.mode
+      : "place";
+    state[side].mode = mode;
+    state[side].point =
+      source.point && Number.isFinite(source.point.lat) ? source.point : null;
+    state[side].radius = Number(source.radius) || 150;
+    state[side].places = Array.isArray(source.places) ? source.places : [];
+    $(`${side}-mode`).value = mode;
+    $(`${side}-radius`).value = String(state[side].radius);
+    $(`${side}-radius-num`).value = String(state[side].radius);
+    $(`${side}-radius-value`).textContent = `${state[side].radius} км`;
+    updateModeUI(side);
+    renderPlaceChips(side);
+    updateCoords(side);
+    if (state[side].point) {
+      drawCircle(side);
+      debouncePreview(side);
+    }
+  });
+  $("origin-country").value = data.origin_place_input || "";
+  $("destination-country").value = data.destination_place_input || "";
+  $("depart-from").value = data.depart_from || "";
+  $("depart-to").value = data.depart_to || "";
+  $("arrive-from").value = data.arrive_from || "";
+  $("arrive-to").value = data.arrive_to || "";
+  $("max-transfers").value = data.max_transfers || "2";
+  $("max-connection-days").value = data.max_connection_days || "2";
+  $("origin-exclude").value = data.exclude_origin || "";
+  $("destination-exclude").value = data.exclude_destination || "";
+  return true;
+}
+
+async function copyShareLink() {
+  updateUrlFromState();
+  try {
+    await navigator.clipboard.writeText(location.href);
+    setStatus("Ссылка скопирована", "ok");
+  } catch (error) {
+    window.prompt("Скопируйте ссылку:", location.href);
+  }
+}
+
+function restoreFromUrl() {
+  const encoded = new URLSearchParams(location.search).get("s");
+  if (!encoded) return;
+  try {
+    if (restoreState(decodeState(encoded))) {
+      runSearch();
+    }
+  } catch (error) {
+    setStatus("Не удалось прочитать ссылку поиска", "error");
+  }
+}
+
 function buildPayload() {
   const payload = {
     origin: endpointPayload("origin"),
@@ -840,6 +957,7 @@ async function runSearch() {
   setStatus("Ищу маршруты: загружаю цены и перебираю связки...", "");
   try {
     const payload = buildPayload();
+    updateUrlFromState();
     const response = await fetch("/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -930,6 +1048,7 @@ function init() {
     });
   });
   $("search-button").addEventListener("click", runSearch);
+  $("share-button").addEventListener("click", copyShareLink);
   $("results-tabs").addEventListener("click", (event) => {
     const tab = event.target.closest(".tab");
     if (!tab) return;
@@ -937,6 +1056,7 @@ function init() {
   });
   refreshCacheInfo();
   refreshDbInfo();
+  restoreFromUrl();
 }
 
 document.addEventListener("DOMContentLoaded", init);
