@@ -643,12 +643,16 @@ function itineraryHtml(itinerary, index) {
   `;
 }
 
-function itineraryDestination(itinerary) {
+function itineraryDirection(itinerary) {
   const legs = itinerary.legs || [];
+  const first = legs[0];
   const last = legs[legs.length - 1];
   return {
-    code: last?.destination_airport || last?.destination || "—",
-    name: last?.destination_name || last?.destination || "—",
+    key: `${first?.origin || ""}|${last?.destination || ""}`,
+    originCode: first?.origin || "—",
+    originName: first?.origin_name || first?.origin || "—",
+    destCode: last?.destination || "—",
+    destName: last?.destination_name || last?.destination || "—",
   };
 }
 
@@ -659,37 +663,33 @@ function renderGroup(group) {
       ? state.groups[group]
       : state.itineraries.map((_, index) => index);
   const rank = new Map(order.map((index, position) => [index, position]));
-  const byDestination = new Map();
+  const byDirection = new Map();
   state.itineraries.forEach((itinerary, index) => {
-    const destination = itineraryDestination(itinerary);
-    if (!byDestination.has(destination.code)) {
-      byDestination.set(destination.code, {
-        code: destination.code,
-        name: destination.name,
-        variants: [],
-      });
+    const direction = itineraryDirection(itinerary);
+    if (!byDirection.has(direction.key)) {
+      byDirection.set(direction.key, { ...direction, variants: [] });
     }
-    byDestination.get(destination.code).variants.push(index);
+    byDirection.get(direction.key).variants.push(index);
   });
-  const destinations = [...byDestination.values()];
-  destinations.forEach((destination) => {
-    destination.variants.sort(
+  const directions = [...byDirection.values()];
+  directions.forEach((direction) => {
+    direction.variants.sort(
       (a, b) => (rank.has(a) ? rank.get(a) : 1e9) - (rank.has(b) ? rank.get(b) : 1e9)
     );
-    destination.best = destination.variants[0];
+    direction.best = direction.variants[0];
   });
-  destinations.sort(
+  directions.sort(
     (a, b) =>
       (rank.has(a.best) ? rank.get(a.best) : 1e9) -
       (rank.has(b.best) ? rank.get(b.best) : 1e9)
   );
 
   const list = $("results-list");
-  list.innerHTML = destinations
-    .map((destination) => {
-      const best = state.itineraries[destination.best];
+  list.innerHTML = directions
+    .map((direction) => {
+      const best = state.itineraries[direction.best];
       const dates = new Map();
-      destination.variants.forEach((index) => {
+      direction.variants.forEach((index) => {
         const itinerary = state.itineraries[index];
         const key = (itinerary.depart_at || "").slice(0, 10);
         if (!dates.has(key)) dates.set(key, []);
@@ -699,23 +699,23 @@ function renderGroup(group) {
       const toggleLabel =
         dateKeys.length > 1
           ? `Есть другие даты (${dateKeys.length})`
-          : `Все варианты (${destination.variants.length})`;
+          : `Все варианты (${direction.variants.length})`;
       const head = `
         <div class="destination-head">
-          <span class="destination-code">${esc(destination.code)} · ${esc(
-            destination.name
-          )}</span>
+          <span class="destination-code">${esc(direction.originCode)} → ${esc(
+            direction.destCode
+          )} · ${esc(direction.originName)} → ${esc(direction.destName)}</span>
           ${
-            destination.variants.length > 1
+            direction.variants.length > 1
               ? `<span class="details-toggle">${esc(toggleLabel)}</span>`
               : ""
           }
         </div>
       `;
-      if (destination.variants.length <= 1) {
-        return `<div class="destination-group" data-dest="${esc(
-          destination.code
-        )}">${head}${itineraryHtml(best, destination.best)}</div>`;
+      if (direction.variants.length <= 1) {
+        return `<div class="destination-group" data-direction="${esc(
+          direction.key
+        )}">${head}${itineraryHtml(best, direction.best)}</div>`;
       }
       const variantBlocks = [...dates.entries()]
         .map(([dateKey, indexes]) => {
@@ -741,8 +741,8 @@ function renderGroup(group) {
         })
         .join("");
       return `
-        <details class="destination-group" data-dest="${esc(destination.code)}">
-          <summary>${head}${itineraryHtml(best, destination.best)}</summary>
+        <details class="destination-group" data-direction="${esc(direction.key)}">
+          <summary>${head}${itineraryHtml(best, direction.best)}</summary>
           <div class="variants-list">${variantBlocks}</div>
         </details>
       `;
@@ -765,11 +765,11 @@ function renderGroup(group) {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.group === group);
   });
-  $("results-count").textContent = `Направлений: ${destinations.length} · вариантов: ${
+  $("results-count").textContent = `Направлений: ${directions.length} · вариантов: ${
     state.itineraries.length
   }`;
-  if (destinations.length > 0) {
-    drawItinerary(destinations[0].best);
+  if (directions.length > 0) {
+    drawItinerary(directions[0].best);
   } else {
     clearLayer(state.routeLayer);
   }

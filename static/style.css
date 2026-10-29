@@ -677,6 +677,8 @@ input[type="range"]:focus {
 .destination-code {
   font-weight: 800;
   font-size: 13px;
+  line-height: 1.35;
+  min-width: 0;
 }
 
 .details-toggle {

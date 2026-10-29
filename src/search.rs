@@ -1229,21 +1229,29 @@ fn build_response(
             .then_with(|| results[a].transfers.cmp(&results[b].transfers))
     });
 
-    let dest_by_index: Vec<String> = results
+    let direction_by_index: Vec<String> = results
         .iter()
         .map(|result| {
-            result
+            let first_origin = result
+                .offer_ids
+                .first()
+                .and_then(|&id| offers.get(id))
+                .map(|offer| offer.origin.clone())
+                .unwrap_or_default();
+            let last_destination = result
                 .offer_ids
                 .last()
-                .map(|&id| offers[id].destination_airport.clone())
-                .unwrap_or_default()
+                .and_then(|&id| offers.get(id))
+                .map(|offer| offer.destination.clone())
+                .unwrap_or_default();
+            format!("{first_origin}|{last_destination}")
         })
         .collect();
 
-    let mut best_price_by_dest: HashMap<String, f64> = HashMap::new();
-    for (index, destination) in dest_by_index.iter().enumerate() {
-        best_price_by_dest
-            .entry(destination.clone())
+    let mut best_price_by_direction: HashMap<String, f64> = HashMap::new();
+    for (index, direction) in direction_by_index.iter().enumerate() {
+        best_price_by_direction
+            .entry(direction.clone())
             .and_modify(|price| {
                 if results[index].price < *price {
                     *price = results[index].price;
@@ -1251,10 +1259,10 @@ fn build_response(
             })
             .or_insert(results[index].price);
     }
-    let mut destinations: Vec<(String, f64)> = best_price_by_dest.into_iter().collect();
-    destinations.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    destinations.truncate(60);
-    let allowed: HashSet<String> = destinations.into_iter().map(|(code, _)| code).collect();
+    let mut directions: Vec<(String, f64)> = best_price_by_direction.into_iter().collect();
+    directions.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    directions.truncate(60);
+    let allowed: HashSet<String> = directions.into_iter().map(|(code, _)| code).collect();
     let per_dest = if allowed.len() <= 2 {
         20
     } else {
@@ -1271,7 +1279,7 @@ fn build_response(
     ] {
         let mut counts: HashMap<&str, usize> = HashMap::new();
         for &index in order {
-            let destination = dest_by_index[index].as_str();
+            let destination = direction_by_index[index].as_str();
             if !allowed.contains(destination) {
                 continue;
             }
