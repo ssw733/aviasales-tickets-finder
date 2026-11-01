@@ -1,5 +1,5 @@
 use crate::api::Travelpayouts;
-use crate::data::{haversine_km, StaticData};
+use crate::data::{haversine_km, is_iata_code, StaticData};
 use crate::graph::{Graph, GraphCache};
 use crate::models::{
     CityPoint, Endpoint, ItineraryGroups, ItineraryResponse, LegResponse, Offer, SearchRequest,
@@ -488,7 +488,7 @@ async fn resolve_fixed(
             limit,
         } => {
             let points =
-                data.airports_in_radius(*lat, *lon, *radius_km, limit.unwrap_or(100).clamp(1, 400));
+                data.airports_in_radius(*lat, *lon, *radius_km, limit.unwrap_or(600).clamp(1, 2000));
             if points.is_empty() {
                 return Err("В выбранном радиусе не найдено аэропортов.".to_string());
             }
@@ -540,7 +540,7 @@ async fn resolve_fixed(
                     .unwrap_or(0);
                 db.cmp(&da).then_with(|| a.code.cmp(&b.code))
             });
-            points.truncate(limit.unwrap_or(200).clamp(1, 400));
+            points.truncate(limit.unwrap_or(1000).clamp(1, 2000));
             if points.is_empty() {
                 return Err("В выбранных странах не найдено аэропортов.".to_string());
             }
@@ -925,6 +925,41 @@ fn merge_labels(map: HashMap<String, Vec<Label>>) -> Vec<Label> {
     output
 }
 
+fn build_airport_transfers(data: &StaticData) -> HashMap<String, Vec<String>> {
+    let mut by_city: HashMap<String, Vec<String>> = HashMap::new();
+    for airport in &data.airports {
+        if !airport.flightable
+            || airport.iata_type != "airport"
+            || !is_iata_code(&airport.code)
+            || airport.city_code.is_empty()
+        {
+            continue;
+        }
+        by_city
+            .entry(airport.city_code.clone())
+            .or_default()
+            .push(airport.code.clone());
+    }
+    let mut output = HashMap::new();
+    for list in by_city.values_mut() {
+        list.sort();
+        list.dedup();
+        if list.len() < 2 {
+            continue;
+        }
+        for (index, airport) in list.iter().enumerate() {
+            let alternatives = list
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, code)| code.clone())
+                .collect();
+            output.insert(airport.clone(), alternatives);
+        }
+    }
+    output
+}
+
 fn pareto_search(
     offers: &[Offer],
     outgoing: &HashMap<String, Vec<usize>>,
@@ -932,6 +967,9 @@ fn pareto_search(
     dests: Option<&[String]>,
     constraints: &Constraints,
     direct_bounds: &HashMap<NaiveDate, f64>,
+    same_city: Option<&HashMap<String, Vec<String>>>,
+    airport_transfer_minutes: i64,
+    result_limit: usize,
 ) -> Vec<PathResult> {
     let dest_set: Option<HashSet<&str>> =
         dests.map(|values| values.iter().map(String::as_str).collect());
@@ -958,30 +996,43 @@ fn pareto_search(
     for _ in 0..constraints.max_legs {
         let mut next: HashMap<String, Vec<Label>> = HashMap::new();
         for label in &frontier {
-            let Some(ids) = outgoing.get(&label.city) else {
-                continue;
-            };
-            let slice: &[usize] = if label.legs == 0 {
-                ids
-            } else {
-                let Some(previous_arrival) = label.arrive_at else {
-                    continue;
-                };
-                let earliest = previous_arrival + min_connection;
-                let latest = previous_arrival + max_slice_gap;
-                let start = ids.partition_point(|id| offers[*id].depart_at < earliest);
-                let end = ids.partition_point(|id| offers[*id].depart_at <= latest);
-                if start >= end {
-                    continue;
+            let mut sources: Vec<(&String, &Vec<usize>, i64, bool)> = Vec::new();
+            if let Some(ids) = outgoing.get(&label.city) {
+                sources.push((&label.city, ids, 0, false));
+            }
+            if label.legs > 0 {
+                if let Some(alts) = same_city.and_then(|map| map.get(&label.city)) {
+                    for alt in alts {
+                        if let Some(ids) = outgoing.get(alt) {
+                            sources.push((alt, ids, airport_transfer_minutes, true));
+                        }
+                    }
                 }
-                &ids[start..end]
-            };
-            let slice = if slice.len() > MAX_OFFERS_PER_LABEL {
-                &slice[..MAX_OFFERS_PER_LABEL]
-            } else {
-                slice
-            };
-            for &offer_id in slice {
+            }
+            for (source_airport, ids, extra_minutes, airport_change) in sources {
+                let slice: &[usize] = if label.legs == 0 {
+                    ids
+                } else {
+                    let Some(previous_arrival) = label.arrive_at else {
+                        continue;
+                    };
+                    let earliest =
+                        previous_arrival + min_connection + Duration::minutes(extra_minutes);
+                    let latest =
+                        previous_arrival + max_slice_gap + Duration::minutes(extra_minutes);
+                    let start = ids.partition_point(|id| offers[*id].depart_at < earliest);
+                    let end = ids.partition_point(|id| offers[*id].depart_at <= latest);
+                    if start >= end {
+                        continue;
+                    }
+                    &ids[start..end]
+                };
+                let slice = if slice.len() > MAX_OFFERS_PER_LABEL {
+                    &slice[..MAX_OFFERS_PER_LABEL]
+                } else {
+                    slice
+                };
+                for &offer_id in slice {
                 expansions += 1;
                 if expansions > MAX_EXPANSIONS {
                     return results;
@@ -1005,7 +1056,8 @@ fn pareto_search(
                     let Some(previous_arrival) = label.arrive_at else {
                         continue;
                     };
-                    let earliest = previous_arrival + min_connection;
+                    let earliest =
+                        previous_arrival + min_connection + Duration::minutes(extra_minutes);
                     if offer.depart_at < earliest {
                         continue;
                     }
@@ -1054,7 +1106,7 @@ fn pareto_search(
                             .unwrap_or(true);
                     if offer.arrive_local_date >= constraints.arrive_from
                         && beats_bound
-                        && results.len() < 150_000
+                        && results.len() < result_limit
                     {
                         results.push(PathResult {
                             offer_ids: offer_ids.clone(),
@@ -1083,6 +1135,9 @@ fn pareto_search(
                     continue;
                 }
                 let mut visited = label.visited.clone();
+                if airport_change && !visited.iter().any(|city| city == source_airport) {
+                    visited.push(source_airport.clone());
+                }
                 visited.push(offer.destination_airport.clone());
                 let next_label = Label {
                     city: offer.destination_airport.clone(),
@@ -1098,6 +1153,7 @@ fn pareto_search(
                 next.entry(next_label.city.clone())
                     .or_default()
                     .push(next_label);
+                }
             }
         }
         frontier = merge_labels(next);
@@ -1507,6 +1563,257 @@ fn build_response(
     (itineraries, groups)
 }
 
+
+fn rebuild_groups(itineraries: &[ItineraryResponse]) -> ItineraryGroups {
+    let mut price: Vec<usize> = (0..itineraries.len()).collect();
+    price.sort_by(|&a, &b| {
+        itineraries[a]
+            .total_price
+            .partial_cmp(&itineraries[b].total_price)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| itineraries[a].total_transfers.cmp(&itineraries[b].total_transfers))
+            .then_with(|| itineraries[a].travel_minutes.cmp(&itineraries[b].travel_minutes))
+            .then_with(|| itineraries[a].depart_at.cmp(&itineraries[b].depart_at))
+    });
+    let mut transfers: Vec<usize> = (0..itineraries.len()).collect();
+    transfers.sort_by(|&a, &b| {
+        itineraries[a]
+            .total_transfers
+            .cmp(&itineraries[b].total_transfers)
+            .then_with(|| {
+                itineraries[a]
+                    .total_price
+                    .partial_cmp(&itineraries[b].total_price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| itineraries[a].travel_minutes.cmp(&itineraries[b].travel_minutes))
+            .then_with(|| itineraries[a].depart_at.cmp(&itineraries[b].depart_at))
+    });
+    let timestamp = |value: &str| -> i64 {
+        DateTime::parse_from_rfc3339(value)
+            .map(|date| date.timestamp())
+            .unwrap_or(0)
+    };
+    let mut dates: Vec<usize> = (0..itineraries.len()).collect();
+    dates.sort_by(|&a, &b| {
+        timestamp(&itineraries[a].depart_at)
+            .cmp(&timestamp(&itineraries[b].depart_at))
+            .then_with(|| {
+                itineraries[a]
+                    .total_price
+                    .partial_cmp(&itineraries[b].total_price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| itineraries[a].total_transfers.cmp(&itineraries[b].total_transfers))
+    });
+    let mut duration: Vec<usize> = (0..itineraries.len()).collect();
+    duration.sort_by(|&a, &b| {
+        itineraries[a]
+            .travel_minutes
+            .cmp(&itineraries[b].travel_minutes)
+            .then_with(|| {
+                itineraries[a]
+                    .total_price
+                    .partial_cmp(&itineraries[b].total_price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| itineraries[a].total_transfers.cmp(&itineraries[b].total_transfers))
+            .then_with(|| itineraries[a].depart_at.cmp(&itineraries[b].depart_at))
+    });
+    ItineraryGroups {
+        price,
+        transfers,
+        dates,
+        duration,
+    }
+}
+
+async fn hybrid_through_search(
+    data: &StaticData,
+    api: &Travelpayouts,
+    graph: &Graph,
+    origins: &[String],
+    dests: &[String],
+    constraints: &Constraints,
+    same_city: Option<&HashMap<String, Vec<String>>>,
+    airport_transfer_minutes: i64,
+    currency: &str,
+    optimize: &str,
+    max_results: usize,
+) -> Vec<ItineraryResponse> {
+    if origins.len() > 8 {
+        return Vec::new();
+    }
+    let mut hub_cities: Vec<String> = Vec::new();
+    let mut hub_seen: HashSet<String> = HashSet::new();
+    for origin in origins {
+        let Some(list) = graph.destinations_by_origin.get(origin) else {
+            continue;
+        };
+        for airport in list {
+            let Some(city) = data.airport_to_city.get(airport) else {
+                continue;
+            };
+            if hub_seen.insert(city.clone()) {
+                hub_cities.push(city.clone());
+            }
+        }
+    }
+    hub_cities.sort_by(|a, b| data.degree(b).cmp(&data.degree(a)));
+    hub_cities.truncate(3);
+    if hub_cities.is_empty() {
+        return Vec::new();
+    }
+
+    let mut dest_cities: Vec<String> = Vec::new();
+    let mut dest_seen: HashSet<String> = HashSet::new();
+    for dest in dests {
+        let Some(city) = data.airport_to_city.get(dest) else {
+            continue;
+        };
+        if dest_seen.insert(city.clone()) {
+            dest_cities.push(city.clone());
+        }
+    }
+    if dest_cities.is_empty() || dest_cities.len() > 24 {
+        return Vec::new();
+    }
+    let pairs: Vec<(String, String)> = hub_cities
+        .iter()
+        .flat_map(|hub| {
+            dest_cities
+                .iter()
+                .map(move |dest| (hub.clone(), dest.clone()))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    let fetched = futures::stream::iter(pairs.into_iter().map(|(hub, dest)| {
+        let currency = currency.to_string();
+        async move {
+            api.fetch_through_offers_limited(&hub, &dest, &currency, 50)
+                .await
+        }
+    }))
+    .buffer_unordered(8)
+    .collect::<Vec<_>>()
+    .await;
+
+    let dest_set: HashSet<&str> = dests.iter().map(String::as_str).collect();
+    let mut hybrid_offers: Vec<Offer> = Vec::new();
+    for result in fetched {
+        let Ok(offers) = result else {
+            continue;
+        };
+        for offer in offers.iter() {
+            if offer.transfers == 0
+                || offer.transfers > constraints.max_transfers
+                || !dest_set.contains(offer.destination_airport.as_str())
+            {
+                continue;
+            }
+            if offer.depart_local_date < constraints.depart_from
+                || offer.depart_local_date > constraints.depart_to
+                || offer.arrive_local_date < constraints.arrive_from
+                || offer.arrive_local_date > constraints.arrive_to
+            {
+                continue;
+            }
+            let mut has_direct = false;
+            let mut through_airports = vec![offer.origin_airport.clone()];
+            if let Some(alts) = same_city.and_then(|map| map.get(&offer.origin_airport)) {
+                through_airports.extend(alts.iter().cloned());
+            }
+            for origin in origins {
+                for origin_airport in &through_airports {
+                    let Some(ids) = graph
+                        .by_route
+                        .get(&(origin.clone(), origin_airport.clone()))
+                    else {
+                        continue;
+                    };
+                    for &id in ids {
+                        let direct = &graph.offers[id];
+                        if direct.transfers != 0 {
+                            continue;
+                        }
+                        hybrid_offers.push(direct.clone());
+                        has_direct = true;
+                    }
+                }
+            }
+            if has_direct {
+                hybrid_offers.push(offer.clone());
+            }
+        }
+    }
+    if hybrid_offers.is_empty() {
+        return Vec::new();
+    }
+    hybrid_offers.sort_by(|a, b| {
+        a.origin_airport
+            .cmp(&b.origin_airport)
+            .then_with(|| a.destination_airport.cmp(&b.destination_airport))
+            .then_with(|| a.depart_at.cmp(&b.depart_at))
+            .then_with(|| {
+                a.price
+                    .partial_cmp(&b.price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| a.flight_number.cmp(&b.flight_number))
+    });
+    hybrid_offers.dedup_by(|a, b| {
+        a.origin_airport == b.origin_airport
+            && a.destination_airport == b.destination_airport
+            && a.depart_at == b.depart_at
+            && (a.price - b.price).abs() < 0.01
+            && a.flight_number == b.flight_number
+            && a.transfers == b.transfers
+    });
+
+    let mut outgoing: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, offer) in hybrid_offers.iter().enumerate() {
+        outgoing
+            .entry(offer.origin_airport.clone())
+            .or_default()
+            .push(index);
+    }
+    for ids in outgoing.values_mut() {
+        ids.sort_by(|a, b| {
+            offers_sort_key(&hybrid_offers[*a])
+                .partial_cmp(&offers_sort_key(&hybrid_offers[*b]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        ids.dedup();
+    }
+    let direct_bounds =
+        direct_bounds_from_offers(&hybrid_offers, origins, dests, constraints, 1.0);
+    let results = pareto_search(
+        &hybrid_offers,
+        &outgoing,
+        origins,
+        Some(dests),
+        constraints,
+        &direct_bounds,
+        same_city,
+        airport_transfer_minutes,
+        50_000,
+    );
+    if results.is_empty() {
+        return Vec::new();
+    }
+    let (itineraries, _) = build_response(
+        data,
+        &hybrid_offers,
+        results,
+        currency,
+        optimize,
+        max_results,
+    );
+    itineraries
+}
+
 pub async fn run_search(
     data: Arc<StaticData>,
     api: Arc<Travelpayouts>,
@@ -1581,6 +1888,13 @@ pub async fn run_search(
                 .to_string(),
         );
     }
+
+    let airport_transfer_minutes = std::env::var("AIRPORT_TRANSFER_MINUTES")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value >= 30 && *value <= 1440)
+        .unwrap_or(180);
+    let same_city = build_airport_transfers(&data);
 
     let constraints = Constraints {
         depart_from,
@@ -1739,6 +2053,24 @@ pub async fn run_search(
         });
     }
 
+    let mut hybrid_itineraries = Vec::new();
+    if graph_usable && !origin_any && !dest_any {
+        hybrid_itineraries = hybrid_through_search(
+            &data,
+            &api,
+            &graph,
+            &origins,
+            &dests,
+            &constraints,
+            Some(&same_city),
+            airport_transfer_minutes,
+            &currency,
+            &optimize,
+            max_results,
+        )
+        .await;
+    }
+
     if graph_usable {
         if dest_any {
             let mut seen: HashSet<String> = dests.iter().cloned().collect();
@@ -1789,16 +2121,167 @@ pub async fn run_search(
         } else {
             direct_bounds_from_graph(&graph, &origins, &dests, &constraints, direct_margin)
         };
-        graph_results = pareto_search(
-            &graph.offers,
-            &graph.outgoing,
-            &origins,
-            destination_arg,
-            &constraints,
-            &direct_bounds,
-        );
+        const ORIGIN_CHUNK: usize = 12;
+        const PER_ORIGIN_LIMIT: usize = 600;
+        if origins.len() <= ORIGIN_CHUNK {
+            graph_results = pareto_search(
+                &graph.offers,
+                &graph.outgoing,
+                &origins,
+                destination_arg,
+                &constraints,
+                &direct_bounds,
+                Some(&same_city),
+                airport_transfer_minutes,
+                150_000,
+            );
+        } else if origins.len() <= PER_ORIGIN_LIMIT {
+            use rayon::prelude::*;
+            let parts: Vec<Vec<PathResult>> = origins
+                .par_iter()
+                .map(|origin| {
+                    let mut part = pareto_search(
+                        &graph.offers,
+                        &graph.outgoing,
+                        std::slice::from_ref(origin),
+                        destination_arg,
+                        &constraints,
+                        &direct_bounds,
+                        Some(&same_city),
+                        airport_transfer_minutes,
+                        50_000,
+                    );
+                    part.sort_by(|a, b| {
+                        a.price
+                            .partial_cmp(&b.price)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then_with(|| a.travel_min.cmp(&b.travel_min))
+                    });
+                    part.truncate(5_000);
+                    part
+                })
+                .collect();
+            graph_results = parts.into_iter().flatten().collect();
+        } else {
+            for chunk in origins.chunks(ORIGIN_CHUNK) {
+                let mut part = pareto_search(
+                    &graph.offers,
+                    &graph.outgoing,
+                    chunk,
+                    destination_arg,
+                    &constraints,
+                    &direct_bounds,
+                    Some(&same_city),
+                    airport_transfer_minutes,
+                    150_000,
+                );
+                graph_results.append(&mut part);
+            }
+        }
+        crate::mem::trim();
         graph_results.sort_by(|a, b| a.offer_ids.cmp(&b.offer_ids));
         graph_results.dedup_by(|a, b| a.offer_ids == b.offer_ids);
+        if graph_results.len() > 150_000 {
+            graph_results.sort_by(|a, b| {
+                a.price
+                    .partial_cmp(&b.price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.travel_min.cmp(&b.travel_min))
+            });
+            graph_results.truncate(150_000);
+        }
+    }
+
+    if dest_any && !origin_any && !graph_results.is_empty() {
+        let mut best_by_city: HashMap<String, f64> = HashMap::new();
+        for result in &graph_results {
+            let Some(&last_id) = result.offer_ids.last() else {
+                continue;
+            };
+            let offer = &graph.offers[last_id];
+            let city = if offer.destination.is_empty() {
+                data.airport_to_city
+                    .get(&offer.destination_airport)
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                offer.destination.clone()
+            };
+            if city.is_empty() {
+                continue;
+            }
+            best_by_city
+                .entry(city)
+                .and_modify(|price| {
+                    if result.price < *price {
+                        *price = result.price;
+                    }
+                })
+                .or_insert(result.price);
+        }
+        let mut candidates: Vec<(String, f64)> = best_by_city.into_iter().collect();
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(20);
+
+        let mut origin_cities: Vec<String> = Vec::new();
+        for origin in &origins {
+            if let Some(city) = data.airport_to_city.get(origin) {
+                if !origin_cities.contains(city) {
+                    origin_cities.push(city.clone());
+                }
+            }
+        }
+        if !origin_cities.is_empty() && !candidates.is_empty() {
+            let max_pairs = 64usize;
+            let per_origin = (max_pairs / origin_cities.len()).max(1);
+            candidates.truncate(per_origin);
+            let pairs: Vec<(String, String)> = origin_cities
+                .iter()
+                .flat_map(|origin| {
+                    candidates
+                        .iter()
+                        .map(move |(destination, _)| (origin.clone(), destination.clone()))
+                })
+                .collect();
+            let fetched = futures::stream::iter(pairs.into_iter().map(|(origin, destination)| {
+                let api = api.clone();
+                let currency = currency.clone();
+                async move {
+                    api.fetch_through_offers_limited(&origin, &destination, &currency, 50)
+                        .await
+                }
+            }))
+            .buffer_unordered(8)
+            .collect::<Vec<_>>()
+            .await;
+            for result in fetched {
+                let Ok(offers) = result else {
+                    continue;
+                };
+                for offer in offers.iter() {
+                    if offer.transfers == 0 || offer.transfers > constraints.max_transfers {
+                        continue;
+                    }
+                    if offer.depart_local_date < constraints.depart_from
+                        || offer.depart_local_date > constraints.depart_to
+                        || offer.arrive_local_date < constraints.arrive_from
+                        || offer.arrive_local_date > constraints.arrive_to
+                    {
+                        continue;
+                    }
+                    aviasales_offers.push(offer.clone());
+                }
+            }
+            aviasales_offers.sort_by(|a, b| {
+                a.price
+                    .partial_cmp(&b.price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.depart_at.cmp(&b.depart_at))
+            });
+            aviasales_offers.dedup_by(|a, b| {
+                a.link == b.link && a.depart_at == b.depart_at && (a.price - b.price).abs() < 0.01
+            });
+        }
     }
 
     let (source, results, routes_requested, routes_failed, offers_considered) =
@@ -1914,6 +2397,9 @@ pub async fn run_search(
                 Some(&dests),
                 &constraints,
                 &direct_bounds,
+                Some(&same_city),
+                airport_transfer_minutes,
+                150_000,
             );
             results.sort_by(|a, b| a.offer_ids.cmp(&b.offer_ids));
             results.dedup_by(|a, b| a.offer_ids == b.offer_ids);
@@ -2049,6 +2535,10 @@ pub async fn run_search(
             });
         }
     }
+    if !hybrid_itineraries.is_empty() {
+        itineraries.extend(hybrid_itineraries);
+    }
+    groups = rebuild_groups(&itineraries);
     if itineraries.is_empty() {
         warnings.push(
             "Маршруты не найдены. Попробуйте расширить окна дат, увеличить радиус/лимит городов, число пересадок или лимит маршрутов."

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -u
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-32}"
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$APP_DIR/target/release/aviasales-pathfinder"

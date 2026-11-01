@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, Semaphore};
 
 const CACHE_TTL: Duration = Duration::from_secs(3600);
 const MAX_CACHE_ROUTES: usize = 1500;
+const MAX_DIRECTIONS_CACHE: usize = 2000;
 const MAX_CONCURRENT: usize = 6;
 
 struct CacheEntry {
@@ -136,7 +137,7 @@ impl Travelpayouts {
         currency: &str,
         store_it: bool,
     ) -> Result<Arc<Vec<Offer>>, String> {
-        self.fetch_offers(origin, destination, currency, true, store_it)
+        self.fetch_offers(origin, destination, currency, true, store_it, 1000)
             .await
     }
 
@@ -146,7 +147,18 @@ impl Travelpayouts {
         destination: &str,
         currency: &str,
     ) -> Result<Arc<Vec<Offer>>, String> {
-        self.fetch_offers(origin, destination, currency, false, false)
+        self.fetch_offers(origin, destination, currency, false, false, 1000)
+            .await
+    }
+
+    pub async fn fetch_through_offers_limited(
+        &self,
+        origin: &str,
+        destination: &str,
+        currency: &str,
+        limit: usize,
+    ) -> Result<Arc<Vec<Offer>>, String> {
+        self.fetch_offers(origin, destination, currency, false, false, limit)
             .await
     }
 
@@ -157,6 +169,7 @@ impl Travelpayouts {
         currency: &str,
         direct: bool,
         store_it: bool,
+        limit: usize,
     ) -> Result<Arc<Vec<Offer>>, String> {
         let key = route_key(origin, destination, currency);
         let _permit = self
@@ -166,6 +179,7 @@ impl Travelpayouts {
             .map_err(|_| "api semaphore closed".to_string())?;
 
         let mut last_error = String::new();
+        let limit_string = limit.to_string();
         for attempt in 0..3 {
             let request = self
                 .http
@@ -178,7 +192,7 @@ impl Travelpayouts {
                     ("sorting", "price"),
                     ("direct", if direct { "true" } else { "false" }),
                     ("currency", currency),
-                    ("limit", "1000"),
+                    ("limit", limit_string.as_str()),
                     ("page", "1"),
                     ("token", self.token.as_str()),
                 ]);
@@ -202,7 +216,7 @@ impl Travelpayouts {
                             let offers = Arc::new(
                                 self.convert_offers(parsed.data.unwrap_or_default(), !direct),
                             );
-                            if direct {
+                            if direct && store_it {
                                 {
                                     let mut cache = self.cache.write().await;
                                     cache.insert(
@@ -424,6 +438,22 @@ impl Travelpayouts {
         }
     }
 
+    async fn maybe_evict_directions(&self) {
+        let mut cache = self.directions.write().await;
+        let now = Instant::now();
+        cache.retain(|_, entry| now.duration_since(entry.fetched) < CACHE_TTL);
+        if cache.len() > MAX_DIRECTIONS_CACHE {
+            let mut entries: Vec<(String, Instant)> = cache
+                .iter()
+                .map(|(key, entry)| (key.clone(), entry.fetched))
+                .collect();
+            entries.sort_by_key(|(_, fetched)| *fetched);
+            for (key, _) in entries.into_iter().take(cache.len() - MAX_DIRECTIONS_CACHE) {
+                cache.remove(&key);
+            }
+        }
+    }
+
     pub async fn get_city_directions(
         &self,
         origin: &str,
@@ -526,6 +556,7 @@ impl Travelpayouts {
                                     },
                                 );
                             }
+                            self.maybe_evict_directions().await;
                             return Ok(codes);
                         }
                         last_error = parsed

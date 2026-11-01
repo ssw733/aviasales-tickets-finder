@@ -665,7 +665,7 @@ impl StaticData {
             b.2.cmp(&a.2)
                 .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
         });
-        list.truncate(limit.clamp(1, 400));
+        list.truncate(limit.clamp(1, 2000));
         list.into_iter()
             .filter_map(|(code, distance, _)| {
                 self.airport_point(&code).map(|mut point| {
@@ -694,7 +694,7 @@ impl StaticData {
             airports.push((airport.code.clone(), self.degree(&airport.city_code)));
         }
         airports.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        airports.truncate(limit.clamp(1, 400));
+        airports.truncate(limit.clamp(1, 2000));
         airports
             .into_iter()
             .filter_map(|(code, _)| self.airport_point(&code))

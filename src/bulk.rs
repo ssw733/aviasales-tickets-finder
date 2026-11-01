@@ -213,6 +213,7 @@ async fn rebuild_graph(graph: &GraphCache) {
         Ok(count) => tracing::info!(offers = count, "ram graph rebuilt"),
         Err(error) => tracing::error!("ram graph rebuild: {error}"),
     }
+    crate::mem::trim();
 }
 
 async fn run_batch(
@@ -268,6 +269,7 @@ async fn run_batch(
                 tracing::warn!(origin, error, "bulk origin failed");
             }
         }
+        crate::mem::trim();
     }
 
     if let Err(error) = store

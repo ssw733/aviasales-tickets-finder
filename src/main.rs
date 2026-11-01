@@ -2,6 +2,7 @@ mod api;
 mod bulk;
 mod data;
 mod graph;
+mod mem;
 mod models;
 mod search;
 mod store;

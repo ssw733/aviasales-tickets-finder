@@ -492,7 +492,7 @@ function endpointPayload(which) {
       lat: item.point.lat,
       lon: item.point.lon,
       radius_km: item.radius,
-      limit: 100,
+      limit: 600,
     };
   }
   const code = $(`${which}-city`).value.trim();
@@ -649,16 +649,27 @@ function drawItinerary(index) {
   });
 }
 
-function legHtml(leg, index, total, nextDepart, currency) {
+function legHtml(leg, index, total, nextLeg, currency) {
   const depart = dateParts(leg.depart_at);
   const arrive = dateParts(leg.arrive_at);
   const link = safeUrl(leg.link);
   const linkHtml = link
     ? `<a class="buy-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">Открыть билет</a>`
     : "";
+  const nextDepart = nextLeg?.depart_at;
+  const airportChange =
+    nextLeg &&
+    leg.destination === nextLeg.origin &&
+    leg.destination_airport !== nextLeg.origin_airport;
   const transferHtml =
     index < total - 1 && nextDepart
-      ? `<div class="transfer-note">Стыковка в ${esc(leg.destination_name)}: ${minutesHuman(
+      ? `<div class="transfer-note${airportChange ? " airport-change" : ""}">${
+          airportChange
+            ? `Смена аэропорта в ${esc(leg.destination_name)}: ${esc(
+                leg.destination_airport
+              )} → ${esc(nextLeg.origin_airport)}. `
+            : `Стыковка в ${esc(leg.destination_name)}: `
+        }${minutesHuman(
           (new Date(nextDepart) - new Date(leg.arrive_at)) / 60000
         )}</div>`
       : "";
@@ -691,8 +702,8 @@ function itineraryHtml(itinerary, index) {
   const legs = itinerary.legs || [];
   const parts = [];
   legs.forEach((leg, legIndex) => {
-    const nextDepart = legIndex < legs.length - 1 ? legs[legIndex + 1].depart_at : null;
-    const result = legHtml(leg, legIndex, legs.length, nextDepart, currency);
+    const nextLeg = legIndex < legs.length - 1 ? legs[legIndex + 1] : null;
+    const result = legHtml(leg, legIndex, legs.length, nextLeg, currency);
     parts.push(result.leg);
     if (result.transfer) parts.push(result.transfer);
   });
@@ -721,9 +732,14 @@ function itineraryHtml(itinerary, index) {
     legs.length === 1 && firstLink
       ? `<a class="buy-link primary-ticket-link" href="${esc(firstLink)}" target="_blank" rel="noopener noreferrer">Открыть билет на Aviasales</a>`
       : "";
+  const hasThroughTicket = legs.some((leg) => Number(leg.transfers || 0) > 0);
   const ticketNote =
     legs.length > 1
-      ? `<div class="ticket-note">Составной маршрут: каждый сегмент — отдельный билет.</div>`
+      ? `<div class="ticket-note">${
+          hasThroughTicket
+            ? "Составной маршрут: прямые сегменты + готовый билет Aviasales."
+            : "Составной маршрут: каждый сегмент — отдельный билет."
+        }</div>`
       : "";
   return `
     <article class="itinerary" data-index="${index}">

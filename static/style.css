@@ -572,6 +572,11 @@ input[type="range"]:focus {
   font-size: 11px;
 }
 
+.transfer-note.airport-change {
+  color: #b45309;
+  font-weight: 600;
+}
+
 .hidden {
   display: none !important;
 }
