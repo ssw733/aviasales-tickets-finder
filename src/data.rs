@@ -594,6 +594,11 @@ impl StaticData {
 
     pub fn resolve_airport_codes(&self, input: &str) -> Option<Vec<String>> {
         let code = input.trim().to_uppercase();
+        // ISO country codes are handled by resolve_country_code in the caller.
+        // Without this guard fuzzy airport names steal them: "VN" → Vnukovo.
+        if self.countries.contains_key(&code) {
+            return None;
+        }
         if self.cities.contains_key(&code) {
             let airports = self.airports_for_city(&code);
             if !airports.is_empty() {
@@ -624,7 +629,8 @@ impl StaticData {
 
     fn find_airport_by_name(&self, input: &str) -> Option<String> {
         let query = normalize_name(input);
-        if query.is_empty() {
+        // Short queries collide with ISO country codes (VN, AE, TR…).
+        if query.chars().count() < 3 {
             return None;
         }
         let mut best: Option<(u8, String)> = None;
