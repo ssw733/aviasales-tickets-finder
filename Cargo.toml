@@ -20,3 +20,8 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 dotenvy = "0.15"
 rayon = "1"
 libc = "0.2"
+mimalloc = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

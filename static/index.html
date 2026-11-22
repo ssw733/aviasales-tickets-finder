@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Поиск маршрутов — Travelpayouts</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=20261029-21">
+  <link rel="stylesheet" href="/style.css?v=20261121-01">
 </head>
 <body>
   <div id="app">
@@ -24,11 +24,11 @@
           </select>
         </div>
         <div id="origin-city-wrap">
-          <input id="origin-city" class="city-input" list="city-list" placeholder="MOW, SVO, Москва" autocomplete="off" value="MOW">
+          <input id="origin-city" class="city-input" list="origin-city-list" placeholder="MOW, SVO, Москва" autocomplete="off" value="MOW">
         </div>
         <div id="origin-country-wrap" class="hidden">
           <div class="country-picker">
-            <input id="origin-country" class="city-input" list="country-list" placeholder="Ульяновск, Санкт-Петербург, RU, Россия" autocomplete="off">
+            <input id="origin-country" class="city-input" list="origin-country-list" placeholder="Ульяновск, Санкт-Петербург, RU, Россия" autocomplete="off">
             <button type="button" class="add-country" data-side="origin">+</button>
           </div>
           <div id="origin-country-chips" class="chips"></div>
@@ -49,7 +49,7 @@
         </div>
         <div class="exclude-label">Исключить города/страны</div>
         <div class="country-picker exclude-picker">
-          <input id="origin-exclude" class="city-input" list="exclude-list" placeholder="Город или страна" autocomplete="off">
+          <input id="origin-exclude" class="city-input" list="origin-exclude-list" placeholder="Город или страна" autocomplete="off">
           <button type="button" class="add-exclude" data-side="origin">−</button>
         </div>
         <div id="origin-exclude-chips" class="chips"></div>
@@ -65,11 +65,11 @@
           </select>
         </div>
         <div id="destination-city-wrap">
-          <input id="destination-city" class="city-input" list="city-list" placeholder="LED, AYT, Стамбул" autocomplete="off" value="LED">
+          <input id="destination-city" class="city-input" list="destination-city-list" placeholder="LED, AYT, Стамбул" autocomplete="off" value="LED">
         </div>
         <div id="destination-country-wrap" class="hidden">
           <div class="country-picker">
-            <input id="destination-country" class="city-input" list="country-list" placeholder="Санкт-Петербург, Хургада, TR, Египет" autocomplete="off">
+            <input id="destination-country" class="city-input" list="destination-country-list" placeholder="Санкт-Петербург, Хургада, TR, Египет" autocomplete="off">
             <button type="button" class="add-country" data-side="destination">+</button>
           </div>
           <div id="destination-country-chips" class="chips"></div>
@@ -90,7 +90,7 @@
         </div>
         <div class="exclude-label">Исключить города/страны</div>
         <div class="country-picker exclude-picker">
-          <input id="destination-exclude" class="city-input" list="exclude-list" placeholder="Город или страна" autocomplete="off">
+          <input id="destination-exclude" class="city-input" list="destination-exclude-list" placeholder="Город или страна" autocomplete="off">
           <button type="button" class="add-exclude" data-side="destination">−</button>
         </div>
         <div id="destination-exclude-chips" class="chips"></div>
@@ -160,10 +160,13 @@
     </div>
   </div>
 
-  <datalist id="city-list"></datalist>
-  <datalist id="country-list"></datalist>
-  <datalist id="exclude-list"></datalist>
+  <datalist id="origin-city-list"></datalist>
+  <datalist id="destination-city-list"></datalist>
+  <datalist id="origin-country-list"></datalist>
+  <datalist id="destination-country-list"></datalist>
+  <datalist id="origin-exclude-list"></datalist>
+  <datalist id="destination-exclude-list"></datalist>
   <script src="/vendor/leaflet/leaflet.js"></script>
-  <script src="/app.js?v=20261029-21"></script>
+  <script src="/app.js?v=20261121-01"></script>
 </body>
 </html>

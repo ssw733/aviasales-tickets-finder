@@ -18,6 +18,23 @@ const MAX_LABELS_TOTAL: usize = 9000;
 const MAX_OFFERS_PER_LABEL: usize = 1500;
 const MAX_FRONTIER_LABELS: usize = 4500;
 const MAX_EXPANSIONS: usize = 2_000_000;
+#[derive(Clone, Copy)]
+struct SearchCaps {
+    per_city: usize,
+    total: usize,
+    frontier: usize,
+    expansions: usize,
+}
+
+const DEFAULT_CAPS: SearchCaps = SearchCaps {
+    per_city: MAX_LABELS_PER_CITY,
+    total: MAX_LABELS_TOTAL,
+    frontier: MAX_FRONTIER_LABELS,
+    expansions: MAX_EXPANSIONS,
+};
+
+
+
 const MAX_ANY_CANDIDATES: usize = 5000;
 const MAX_ANY_POINTS: usize = 200;
 const MAX_PATHS: usize = 700;
@@ -889,7 +906,7 @@ fn same_metrics(a: &Label, b: &Label) -> bool {
         && a.transfers == b.transfers
 }
 
-fn merge_labels(map: HashMap<String, Vec<Label>>) -> Vec<Label> {
+fn merge_labels(map: HashMap<String, Vec<Label>>, caps: SearchCaps) -> Vec<Label> {
     let mut output = Vec::new();
     for (_, mut labels) in map {
         labels.sort_by(|a, b| {
@@ -913,12 +930,12 @@ fn merge_labels(map: HashMap<String, Vec<Label>>) -> Vec<Label> {
             }
             kept.retain(|other| !dominates(&label, other));
             kept.push(label);
-            if kept.len() >= MAX_LABELS_PER_CITY {
+            if kept.len() >= caps.per_city {
                 break;
             }
         }
         output.extend(kept);
-        if output.len() >= MAX_LABELS_TOTAL {
+        if output.len() >= caps.total {
             break;
         }
     }
@@ -969,6 +986,7 @@ fn pareto_search(
     direct_bounds: &HashMap<NaiveDate, f64>,
     same_city: Option<&HashMap<String, Vec<String>>>,
     airport_transfer_minutes: i64,
+    caps: SearchCaps,
     result_limit: usize,
 ) -> Vec<PathResult> {
     let dest_set: Option<HashSet<&str>> =
@@ -1034,7 +1052,7 @@ fn pareto_search(
                 };
                 for &offer_id in slice {
                 expansions += 1;
-                if expansions > MAX_EXPANSIONS {
+                if expansions > caps.expansions {
                     return results;
                 }
                 let offer = &offers[offer_id];
@@ -1156,8 +1174,8 @@ fn pareto_search(
                 }
             }
         }
-        frontier = merge_labels(next);
-        if frontier.len() > MAX_FRONTIER_LABELS {
+        frontier = merge_labels(next, caps);
+        if frontier.len() > caps.frontier {
             frontier.sort_by(|a, b| {
                 a.price
                     .partial_cmp(&b.price)
@@ -1166,7 +1184,7 @@ fn pareto_search(
                     .then_with(|| label_timestamp(a).cmp(&label_timestamp(b)))
                     .then_with(|| a.transfers.cmp(&b.transfers))
             });
-            frontier.truncate(MAX_FRONTIER_LABELS);
+            frontier.truncate(caps.frontier);
         }
         if frontier.is_empty() {
             break;
@@ -1271,6 +1289,7 @@ fn build_response(
     currency: &str,
     optimize: &str,
     max_results: usize,
+    direction_limit: usize,
 ) -> (Vec<ItineraryResponse>, ItineraryGroups) {
     if results.is_empty() {
         return (Vec::new(), ItineraryGroups::default());
@@ -1419,7 +1438,7 @@ fn build_response(
     }
     let mut directions: Vec<(String, f64)> = best_price_by_direction.into_iter().collect();
     directions.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    directions.truncate(60);
+    directions.truncate(direction_limit);
     let allowed: HashSet<String> = directions.into_iter().map(|(code, _)| code).collect();
     let per_dest = if allowed.len() <= 2 {
         20
@@ -1725,6 +1744,11 @@ async fn hybrid_through_search(
             if let Some(alts) = same_city.and_then(|map| map.get(&offer.origin_airport)) {
                 through_airports.extend(alts.iter().cloned());
             }
+            // Through-ticket already departing from a search origin needs no feeder
+            // (by_route has no self-loops, so the old check always missed this case).
+            if origins.contains(&offer.origin_airport) {
+                has_direct = true;
+            }
             for origin in origins {
                 for origin_airport in &through_airports {
                     let Some(ids) = graph
@@ -1798,6 +1822,7 @@ async fn hybrid_through_search(
         &direct_bounds,
         same_city,
         airport_transfer_minutes,
+        DEFAULT_CAPS,
         50_000,
     );
     if results.is_empty() {
@@ -1810,6 +1835,7 @@ async fn hybrid_through_search(
         currency,
         optimize,
         max_results,
+        60,
     );
     itineraries
 }
@@ -1961,6 +1987,7 @@ pub async fn run_search(
             &currency,
             &optimize,
             max_results,
+            60,
         );
         warnings.push(
             "Для «откуда угодно» + «куда угодно» показаны самые дешёвые билеты по всей базе. Для поиска по конкретному направлению выберите город или регион."
@@ -2123,6 +2150,7 @@ pub async fn run_search(
         };
         const ORIGIN_CHUNK: usize = 12;
         const PER_ORIGIN_LIMIT: usize = 600;
+        let search_caps = DEFAULT_CAPS;
         if origins.len() <= ORIGIN_CHUNK {
             graph_results = pareto_search(
                 &graph.offers,
@@ -2133,6 +2161,7 @@ pub async fn run_search(
                 &direct_bounds,
                 Some(&same_city),
                 airport_transfer_minutes,
+                search_caps,
                 150_000,
             );
         } else if origins.len() <= PER_ORIGIN_LIMIT {
@@ -2149,6 +2178,7 @@ pub async fn run_search(
                         &direct_bounds,
                         Some(&same_city),
                         airport_transfer_minutes,
+                        search_caps,
                         50_000,
                     );
                     part.sort_by(|a, b| {
@@ -2173,6 +2203,7 @@ pub async fn run_search(
                     &direct_bounds,
                     Some(&same_city),
                     airport_transfer_minutes,
+                    search_caps,
                     150_000,
                 );
                 graph_results.append(&mut part);
@@ -2399,6 +2430,7 @@ pub async fn run_search(
                 &direct_bounds,
                 Some(&same_city),
                 airport_transfer_minutes,
+                DEFAULT_CAPS,
                 150_000,
             );
             results.sort_by(|a, b| a.offer_ids.cmp(&b.offer_ids));
@@ -2420,6 +2452,7 @@ pub async fn run_search(
         &currency,
         &optimize,
         max_results,
+        60,
     );
     if !aviasales_offers.is_empty() {
         let mut base_min: HashMap<String, f64> = HashMap::new();
@@ -2469,6 +2502,7 @@ pub async fn run_search(
             &currency,
             &optimize,
             max_results,
+            60,
         );
         if !aviasales_itineraries.is_empty() {
             let base_len = itineraries.len();

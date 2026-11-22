@@ -594,6 +594,12 @@ impl StaticData {
 
     pub fn resolve_airport_codes(&self, input: &str) -> Option<Vec<String>> {
         let code = input.trim().to_uppercase();
+        if self.cities.contains_key(&code) {
+            let airports = self.airports_for_city(&code);
+            if !airports.is_empty() {
+                return Some(airports);
+            }
+        }
         if let Some(airport) = self.airport_by_code.get(&code) {
             if airport.iata_type == "airport" && airport.flightable && is_iata_code(&code) {
                 return Some(vec![code]);
@@ -605,12 +611,127 @@ impl StaticData {
                 return Some(airports);
             }
         }
+        if let Some(airport_code) = self.find_airport_by_name(input) {
+            return Some(vec![airport_code]);
+        }
         if let Some(airport) = self.airport_by_code.get(&code) {
             if airport.iata_type == "airport" && is_iata_code(&code) {
                 return Some(vec![code]);
             }
         }
         None
+    }
+
+    fn find_airport_by_name(&self, input: &str) -> Option<String> {
+        let query = normalize_name(input);
+        if query.is_empty() {
+            return None;
+        }
+        let mut best: Option<(u8, String)> = None;
+        for airport in &self.airports {
+            if airport.iata_type != "airport" || !is_iata_code(&airport.code) {
+                continue;
+            }
+            let name = normalize_name(&airport.name);
+            let name_en = normalize_name(&airport.name_en);
+            let score = if name == query || name_en == query {
+                0
+            } else if name.starts_with(&query) || name_en.starts_with(&query) {
+                1
+            } else if name.contains(&query) || name_en.contains(&query) {
+                2
+            } else {
+                continue;
+            };
+            match &best {
+                None => best = Some((score, airport.code.clone())),
+                Some((best_score, _)) if score < *best_score => {
+                    best = Some((score, airport.code.clone()))
+                }
+                _ => {}
+            }
+        }
+        best.map(|(_, code)| code)
+    }
+
+    pub fn search_airports(&self, query: &str, limit: usize) -> Vec<CityPoint> {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let query_norm = normalize_name(&query);
+        let query_upper = query.to_uppercase();
+        let mut scored: Vec<(u8, CityPoint)> = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(airport) = self.airport_by_code.get(&query_upper) {
+            if airport.iata_type == "airport" && is_iata_code(&airport.code) {
+                if let Some(mut point) = self.airport_point(&airport.code) {
+                    point.name = format!(
+                        "{} · {}",
+                        self.city_name(&airport.city_code),
+                        airport.name
+                    );
+                    scored.push((0, point));
+                    seen.insert(airport.code.clone());
+                }
+            }
+        }
+
+        for airport in &self.airports {
+            if airport.iata_type != "airport" || !is_iata_code(&airport.code) {
+                continue;
+            }
+            let name = normalize_name(&airport.name);
+            let name_en = normalize_name(&airport.name_en);
+            let code = airport.code.to_lowercase();
+            let score = if code == query {
+                0
+            } else if code.starts_with(&query) {
+                1
+            } else if name.starts_with(&query_norm) || name_en.starts_with(&query_norm) {
+                2
+            } else if name.contains(&query_norm) || name_en.contains(&query_norm) {
+                3
+            } else {
+                continue;
+            };
+            if !seen.insert(airport.code.clone()) {
+                continue;
+            }
+            if let Some(mut point) = self.airport_point(&airport.code) {
+                point.name = format!(
+                    "{} · {}",
+                    self.city_name(&airport.city_code),
+                    airport.name
+                );
+                scored.push((score, point));
+            }
+        }
+
+        scored.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()))
+        });
+        scored
+            .into_iter()
+            .take(limit.clamp(1, 50))
+            .map(|(_, point)| point)
+            .collect()
+    }
+
+    pub fn airports_points_for_city(&self, city_code: &str, limit: usize) -> Vec<CityPoint> {
+        let city_name = self.city_name(city_code);
+        self.airports_for_city(city_code)
+            .into_iter()
+            .take(limit.clamp(1, 50))
+            .filter_map(|code| {
+                let airport = self.airport_by_code.get(&code)?;
+                let mut point = self.airport_point(&code)?;
+                point.name = format!("{} · {}", city_name, airport.name);
+                Some(point)
+            })
+            .collect()
     }
 
     pub fn airport_point(&self, airport_code: &str) -> Option<CityPoint> {

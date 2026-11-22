@@ -237,6 +237,7 @@ async function previewRegion(which) {
 
 function bindCityAutocomplete(inputId) {
   const input = $(inputId);
+  const listId = inputId.endsWith("-city") ? `${inputId.replace("-city", "")}-city-list` : "origin-city-list";
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
@@ -247,7 +248,7 @@ function bindCityAutocomplete(inputId) {
         const response = await fetch(`/api/cities?q=${encodeURIComponent(query)}&limit=15`);
         if (!response.ok) return;
         const cities = await response.json();
-        $("city-list").innerHTML = cities
+        $(listId).innerHTML = cities
           .map(
             (city) =>
               `<option value="${esc(city.code)}">${esc(city.code)} — ${esc(city.name)}</option>`
@@ -262,6 +263,7 @@ function bindCityAutocomplete(inputId) {
 
 function bindPlaceAutocomplete(inputId) {
   const input = $(inputId);
+  const listId = `${inputId}-list`;
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
@@ -272,11 +274,11 @@ function bindPlaceAutocomplete(inputId) {
         const response = await fetch(`/api/places?q=${encodeURIComponent(query)}&limit=20`);
         if (!response.ok) return;
         const places = await response.json();
-        $("country-list").innerHTML = places
+        $(listId).innerHTML = places
           .map(
             (place) =>
               `<option value="${esc(place.code)}">${esc(place.code)} — ${esc(place.name)}${
-                place.kind === "country" ? " (страна)" : ""
+                place.kind === "country" ? " (страна)" : place.kind === "airport" ? " (аэропорт)" : ""
               }</option>`
           )
           .join("");
@@ -384,6 +386,7 @@ function renderExcludeChips(side) {
 
 function bindExcludeAutocomplete(inputId) {
   const input = $(inputId);
+  const listId = `${inputId}-list`;
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
@@ -394,11 +397,11 @@ function bindExcludeAutocomplete(inputId) {
         const response = await fetch(`/api/places?q=${encodeURIComponent(query)}&limit=20`);
         if (!response.ok) return;
         const places = await response.json();
-        $("exclude-list").innerHTML = places
+        $(listId).innerHTML = places
           .map(
             (place) =>
               `<option value="${esc(place.code)}">${esc(place.code)} — ${esc(place.name)}${
-                place.kind === "country" ? " (страна)" : ""
+                place.kind === "country" ? " (страна)" : place.kind === "airport" ? " (аэропорт)" : ""
               }</option>`
           )
           .join("");
@@ -534,6 +537,31 @@ function buildPayload() {
     if (value) payload[key] = value;
   }
   return payload;
+}
+
+function exactSearchHref(direction) {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams();
+  params.set("exact", "1");
+  params.set("origin", direction.originCode);
+  params.set("destination", direction.destCode);
+  params.set("origin_name", direction.originName || direction.originCode);
+  params.set("destination_name", direction.destName || direction.destCode);
+  const transfers = $("max-transfers").value;
+  if (transfers) params.set("max_transfers", transfers);
+  const connectionDays = $("max-connection-days").value;
+  if (connectionDays) params.set("max_connection_days", connectionDays);
+  for (const [key, id] of [
+    ["depart_from", "depart-from"],
+    ["depart_to", "depart-to"],
+    ["arrive_from", "arrive-from"],
+    ["arrive_to", "arrive-to"],
+  ]) {
+    const value = $(id).value;
+    if (value) params.set(key, value);
+  }
+  url.search = params.toString();
+  return url.href;
 }
 
 function numberHuman(value) {
@@ -999,6 +1027,10 @@ function renderGroup(group) {
         dateKeys.size > 1
           ? `Есть другие даты (${dateKeys.size})`
           : `Варианты (${direction.variants.length})`;
+      const exactLink =
+        state.destination.mode === "any"
+          ? `<a class="exact-link" href="${esc(exactSearchHref(direction))}" target="_blank" rel="noopener noreferrer">Точный расчёт ↗</a>`
+          : "";
       return `
         <div class="destination-group" data-direction="${esc(
           direction.key
@@ -1007,13 +1039,13 @@ function renderGroup(group) {
             <span class="destination-code">${esc(direction.originCode)} → ${esc(
               direction.destCode
             )} · ${esc(direction.originName)} → ${esc(direction.destName)}</span>
-            ${
+            <span class="destination-actions">${exactLink}${
               direction.variants.length > 1
                 ? `<button type="button" class="details-toggle variants-open">${esc(
                     label
                   )}</button>`
                 : ""
-            }
+            }</span>
           </div>
           ${itineraryHtml(best, direction.best)}
         </div>
@@ -1134,6 +1166,39 @@ function initMap() {
   });
 }
 
+function applyExactFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("exact") !== "1") return false;
+  const origin = params.get("origin");
+  const destination = params.get("destination");
+  if (!origin || !destination) return false;
+  const sides = [
+    ["origin", origin, params.get("origin_name") || origin],
+    ["destination", destination, params.get("destination_name") || destination],
+  ];
+  for (const [side, code, name] of sides) {
+    $(`${side}-mode`).value = "place";
+    state[side].mode = "place";
+    state[side].places = [{ kind: "city", code, name }];
+    renderPlaceChips(side);
+    updateModeUI(side);
+  }
+  const transfers = params.get("max_transfers");
+  if (transfers !== null) $("max-transfers").value = transfers;
+  const connectionDays = params.get("max_connection_days");
+  if (connectionDays !== null) $("max-connection-days").value = connectionDays;
+  for (const [key, id] of [
+    ["depart_from", "depart-from"],
+    ["depart_to", "depart-to"],
+    ["arrive_from", "arrive-from"],
+    ["arrive_to", "arrive-to"],
+  ]) {
+    const value = params.get(key);
+    if (value) $(id).value = value;
+  }
+  return true;
+}
+
 function init() {
   initMap();
 
@@ -1215,6 +1280,9 @@ function init() {
     if (event.key === "Escape") closeVariants();
   });
   refreshDbInfo();
+  if (applyExactFromUrl()) {
+    setTimeout(() => runSearch(), 50);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -1,3 +1,6 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod api;
 mod bulk;
 mod data;
@@ -25,8 +28,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tower_http::services::ServeDir;
@@ -34,12 +38,22 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+const SEARCH_CACHE_TTL: Duration = Duration::from_secs(300);
+const SEARCH_CACHE_MAX: usize = 16;
+
+struct SearchCacheEntry {
+    created: Instant,
+    graph_built: String,
+    response: SearchResponse,
+}
+
 struct AppState {
     data: Arc<StaticData>,
     api: Arc<Travelpayouts>,
     store: Store,
     graph: Arc<GraphCache>,
     search_lock: Arc<Semaphore>,
+    search_cache: Arc<Mutex<HashMap<String, SearchCacheEntry>>>,
 }
 
 struct AppError {
@@ -143,22 +157,31 @@ async fn places(
     Query(params): Query<PlacesParams>,
 ) -> Json<Vec<PlacePoint>> {
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
-    let mut places = Vec::new();
+    let mut places: Vec<PlacePoint> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let push = |places: &mut Vec<PlacePoint>, seen: &mut std::collections::HashSet<String>, kind: &str, code: String, name: String| {
+        let key = format!("{kind}:{code}");
+        if seen.insert(key) {
+            places.push(PlacePoint {
+                kind: kind.to_string(),
+                code,
+                name,
+            });
+        }
+    };
     for city in state.data.search_cities(&params.q, limit) {
-        places.push(PlacePoint {
-            kind: "city".to_string(),
-            code: city.code,
-            name: city.name,
-        });
+        push(&mut places, &mut seen, "city", city.code.clone(), city.name.clone());
+        for point in state.data.airports_points_for_city(&city.code, 8) {
+            push(&mut places, &mut seen, "airport", point.code, point.name);
+        }
+    }
+    for point in state.data.search_airports(&params.q, limit) {
+        push(&mut places, &mut seen, "airport", point.code, point.name);
     }
     for country in state.data.search_countries(&params.q, limit) {
-        places.push(PlacePoint {
-            kind: "country".to_string(),
-            code: country.code,
-            name: country.name,
-        });
+        push(&mut places, &mut seen, "country", country.code, country.name);
     }
-    places.truncate(limit * 2);
+    places.truncate(limit * 4);
     Json(places)
 }
 
@@ -204,6 +227,21 @@ async fn search(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, AppError> {
+    let cache_key = serde_json::to_string(&request).unwrap_or_default();
+    let graph_built = state.graph.snapshot().await.built_at.to_rfc3339();
+    {
+        let cache = state
+            .search_cache
+            .lock()
+            .map_err(|_| AppError::internal("Кэш поиска недоступен."))?;
+        if let Some(entry) = cache.get(&cache_key) {
+            if entry.graph_built == graph_built && entry.created.elapsed() < SEARCH_CACHE_TTL {
+                let mut response = entry.response.clone();
+                response.elapsed_ms = 0;
+                return Ok(Json(response));
+            }
+        }
+    }
     let _permit = state
         .search_lock
         .acquire()
@@ -221,7 +259,30 @@ async fn search(
     )
     .await;
     match result {
-        Ok(Ok(response)) => Ok(Json(response)),
+        Ok(Ok(response)) => {
+            if response.itineraries.len() <= 250 {
+                if let Ok(mut cache) = state.search_cache.lock() {
+                    cache.insert(
+                        cache_key,
+                        SearchCacheEntry {
+                            created: Instant::now(),
+                            graph_built,
+                            response: response.clone(),
+                        },
+                    );
+                    if cache.len() > SEARCH_CACHE_MAX {
+                        let oldest = cache
+                            .iter()
+                            .min_by_key(|(_, entry)| entry.created)
+                            .map(|(key, _)| key.clone());
+                        if let Some(key) = oldest {
+                            cache.remove(&key);
+                        }
+                    }
+                }
+            }
+            Ok(Json(response))
+        }
         Ok(Err(error)) => Err(AppError::bad_request(error)),
         Err(_) => Err(AppError::timeout(
             "Поиск занял слишком много времени. Уменьшите лимит маршрутов или количество городов.",
@@ -346,6 +407,7 @@ async fn main() -> Result<()> {
         store,
         graph,
         search_lock: Arc::new(Semaphore::new(1)),
+        search_cache: Arc::new(Mutex::new(HashMap::new())),
     });
     let listener = TcpListener::bind((host.as_str(), port)).await?;
     tracing::info!("listening on http://{host}:{port}");
